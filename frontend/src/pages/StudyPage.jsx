@@ -1,8 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
+import mascotImg from '../assets/Screenshot 2026-02-26 at 18.28.04.png';
 import { useApp } from '../context/AppContext';
 import { generateStudyContent, askQuestion } from '../utils/mockApi';
 import { marked } from 'marked';
 import { jsPDF } from 'jspdf';
+import {
+    BookOpen, FileText, Zap, Sparkles, MessageSquare,
+    RefreshCw, FileDown, Send, Bot, User,
+    CheckCircle2, AlertCircle, Quote, Eye, EyeOff, SearchX, ShieldCheck
+} from 'lucide-react';
 
 // --- MCQ Components ---
 function MCQCard({ q, index }) {
@@ -58,8 +64,9 @@ function ShortAnsCard({ q, index }) {
             <button
                 className={`btn btn-sm ${revealed ? 'btn-ghost' : 'btn-secondary'}`}
                 onClick={() => setRevealed(v => !v)}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
             >
-                {revealed ? 'Hide answer' : 'Show model answer'}
+                {revealed ? <><EyeOff size={14} /> Hide answer</> : <><Eye size={14} /> Show model answer</>}
             </button>
             <div className={`short-ans-answer ${revealed ? 'visible' : ''}`}>
                 <div style={{ marginBottom: 6 }}>{q.answer}</div>
@@ -73,7 +80,7 @@ function ShortAnsCard({ q, index }) {
 function TypingIndicator() {
     return (
         <div className="message ai">
-            <div className="avatar ai">AI</div>
+            <div className="avatar ai"><Bot size={16} /></div>
             <div className="typing-indicator">
                 <div className="typing-dot" />
                 <div className="typing-dot" />
@@ -89,9 +96,10 @@ function AnswerMessage({ msg }) {
         return (
             <div className="message-content">
                 <div className="message-bubble">
-                    <div className="not-found-block">
+                    <div className="not-found-block" style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                        <SearchX size={20} color="var(--accent-red)" style={{ marginTop: 2 }} />
                         <div>
-                            <div style={{ fontWeight: 600 }}>Not found in your notes</div>
+                            <div style={{ fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem' }}>NOT FOUND IN YOUR NOTES</div>
                             <div style={{ fontSize: '0.79rem', marginTop: 4, opacity: 0.85 }}>
                                 The uploaded notes don't contain sufficient information to answer this question.
                             </div>
@@ -107,14 +115,16 @@ function AnswerMessage({ msg }) {
             <div className="message-bubble">
                 <div dangerouslySetInnerHTML={{ __html: marked.parse(data?.answer || '') }} />
                 <div className="answer-meta">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                        <span className={`confidence-badge ${data?.confidence?.toLowerCase()}`}>
-                            {data?.confidence} Confidence
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                        <span className={`confidence-badge ${data?.confidence?.toLowerCase()}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <ShieldCheck size={12} /> {data?.confidence}
                         </span>
                     </div>
                     {data?.evidence?.length > 0 && (
-                        <div className="evidence-block" style={{ marginTop: 8 }}>
-                            <div className="evidence-label">Supporting Evidence</div>
+                        <div className="evidence-block">
+                            <div className="evidence-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Quote size={10} /> SUPPORTING EVIDENCE
+                            </div>
                             {data.evidence.map((e, i) => (
                                 <div key={i} className="evidence-snippet">"{e}"</div>
                             ))}
@@ -129,9 +139,17 @@ function AnswerMessage({ msg }) {
 
 export default function StudyPage() {
     const { subjects, activeSubjectId, setActiveSubjectId, activeSubject, setCurrentPage, isSetupComplete, addMessage } = useApp();
-    const [content, setContent] = useState(null);
+
+    // Per-file content cache: { [fileName]: content }
+    // "combined" key is used for all files together
+    const [contentCache, setContentCache] = useState({});
+    const [selectedFileName, setSelectedFileName] = useState('combined');
+
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
+
+    const content = contentCache[selectedFileName] || null;
+
 
     // Chat state
     const [inputText, setInputText] = useState('');
@@ -139,25 +157,37 @@ export default function StudyPage() {
     const messagesEndRef = useRef(null);
     const textareaRef = useRef(null);
 
-    // Auto-generate content when subject changes
+    // Auto-generate content when subject or selected file changes
     useEffect(() => {
-        setContent(null);
         setError('');
         if (activeSubject && activeSubject.name && activeSubject.files.length > 0) {
-            handleGenerate();
+            // If we don't have content for the current selection, generate it
+            if (!contentCache[selectedFileName]) {
+                handleGenerate(selectedFileName);
+            }
         }
+    }, [activeSubjectId, selectedFileName]);
+
+    // Reset selection when subject changes
+    useEffect(() => {
+        setSelectedFileName('combined');
+        setContentCache({});
     }, [activeSubjectId]);
 
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }, [activeSubject?.chatHistory, isTyping]);
 
-    const handleGenerate = async () => {
+    const handleGenerate = async (fileName = selectedFileName) => {
         setLoading(true);
         setError('');
+        const fn = fileName === 'combined' ? undefined : fileName;
         try {
-            const result = await generateStudyContent(activeSubjectId, activeSubject?.name);
-            setContent(result);
+            const result = await generateStudyContent(activeSubjectId, activeSubject?.name, fn);
+            setContentCache(prev => ({
+                ...prev,
+                [fileName]: result
+            }));
         } catch (err) {
             console.error('Study mode error:', err);
             setError(err.message || 'Failed to generate study content.');
@@ -242,6 +272,7 @@ export default function StudyPage() {
         return (
             <div className="page-content">
                 <div className="empty-state" style={{ paddingTop: 80 }}>
+                    <AlertCircle size={48} color="var(--accent-red)" style={{ marginBottom: 20 }} />
                     <h3>Setup not complete</h3>
                     <p>Name at least one subject before using Subject Dashboard.</p>
                     <button className="btn btn-primary" onClick={() => setCurrentPage('setup')}>Go to Setup</button>
@@ -271,20 +302,12 @@ export default function StudyPage() {
             </div>
 
             {loading && !content && (
-                <div className="empty-state" style={{ paddingTop: 64 }}>
-                    <div className="ai-loader">
-                        <div className="logo-mark" style={{ width: 48, height: 48, marginBottom: 20 }}>
-                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                            </svg>
-                        </div>
+                <div className="empty-state" style={{ paddingTop: '5vh' }}>
+                    <div className="ai-loader" style={{ marginBottom: 32 }}>
+                        <img src={mascotImg} alt="Mascot" style={{ width: 180, height: 180, borderRadius: '50%', border: '2px solid var(--accent-neon)', boxShadow: 'var(--glow)', objectFit: 'cover' }} />
                     </div>
-                    <h3>Generating Subject Dashboard...</h3>
-                    <p>Analyzing your files to create short notes and practice questions.</p>
-                    <div style={{ display: 'flex', gap: 5, marginTop: 12 }}>
-                        {[0, 1, 2].map(i => <div key={i} className="typing-dot" style={{ width: 8, height: 8, animationDelay: `${i * 0.2}s` }} />)}
-                    </div>
+                    <h3 style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent-neon)', textTransform: 'uppercase' }}>ANALYZING MATERIAL...</h3>
+                    <p style={{ color: 'var(--text-secondary)' }}>Generating subject dashboard and practice questions.</p>
                 </div>
             )}
 
@@ -300,37 +323,66 @@ export default function StudyPage() {
 
             {content && (
                 <div className="study-container animate-fade-in">
-                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, gap: 8 }}>
-                        <button className="btn btn-secondary btn-sm" onClick={handleGenerate} disabled={loading}>
-                            {loading ? 'Regenerating...' : 'Regenerate All'}
+                    {activeSubject?.files.length > 1 && (
+                        <div style={{ marginBottom: 24 }}>
+                            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, fontFamily: 'JetBrains Mono, monospace' }}>
+                                Generate for:
+                            </div>
+                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                                <button
+                                    className={`subject-tab ${selectedFileName === 'combined' ? 'active' : ''}`}
+                                    onClick={() => setSelectedFileName('combined')}
+                                    style={{ fontSize: '0.75rem', padding: '6px 12px' }}
+                                >
+                                    All Files Combined
+                                </button>
+                                {activeSubject.files.map((file, idx) => (
+                                    <button
+                                        key={idx}
+                                        className={`subject-tab ${selectedFileName === file.name ? 'active' : ''}`}
+                                        onClick={() => setSelectedFileName(file.name)}
+                                        style={{ fontSize: '0.75rem', padding: '6px 12px' }}
+                                    >
+                                        <FileText size={12} style={{ marginRight: 4, opacity: 0.7 }} />
+                                        {file.name}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: 8 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={() => handleGenerate(selectedFileName)} disabled={loading}>
+                            {loading ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                            {loading ? 'REGENERATING...' : selectedFileName === 'combined' ? 'REGENERATE ALL' : `REGENERATE FOR ${selectedFileName.toUpperCase()}`}
                         </button>
                         <button className="btn btn-primary btn-sm" onClick={downloadPDF}>
-                            📥 Download as PDF
+                            <FileDown size={14} /> DOWNLOAD PDF
                         </button>
                     </div>
 
                     {/* --- Section 1: Auto-generated Short Notes --- */}
                     <div className="study-section">
-                        <div className="questions-section-title">
-                            <span style={{ marginRight: 8 }}>📝</span> Subject Summary & Key Notes
+                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <FileText size={18} color="var(--accent-neon)" /> Subject Summary & Key Notes
                         </div>
-                        <div className="notes-content card glass" style={{ borderLeft: '4px solid var(--accent-blue)' }}>
+                        <div className="notes-content card glass" style={{ borderLeft: '4px solid var(--accent-neon)' }}>
                             <div dangerouslySetInnerHTML={{ __html: marked.parse(content.notes || '_The AI could not generate a summary for this specific material. Try uploading more detailed notes._') }} />
                         </div>
                     </div>
 
                     {/* --- Section 2: MCQs --- */}
                     <div className="study-section" style={{ marginTop: 32 }}>
-                        <div className="questions-section-title">
-                            <span style={{ marginRight: 8 }}>🎯</span> Practice Quiz (MCQs)
+                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Zap size={18} color="var(--accent-neon)" /> Practice Quiz (MCQs)
                         </div>
                         {(content.mcqs || []).map((q, i) => <MCQCard key={i} q={q} index={i} />)}
                     </div>
 
                     {/* --- Section 3: Short Answer --- */}
                     <div className="study-section" style={{ marginTop: 32 }}>
-                        <div className="questions-section-title">
-                            <span style={{ marginRight: 8 }}>💡</span> Key Flashcards
+                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <Sparkles size={18} color="var(--accent-neon)" /> Key Flashcards
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
                             {(content.shortAnswer || []).map((q, i) => <ShortAnsCard key={i} q={q} index={i} />)}
@@ -339,8 +391,8 @@ export default function StudyPage() {
 
                     {/* --- Section 4: Chat --- */}
                     <div className="study-section chat-integration" style={{ marginTop: 48, borderTop: '2px solid var(--border)', paddingTop: 32 }}>
-                        <div className="questions-section-title">
-                            <span style={{ marginRight: 8 }}>💬</span> Ask My Notes — AI Q&A
+                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <MessageSquare size={18} color="var(--accent-neon)" /> Ask My Notes — AI Q&A
                         </div>
                         <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
                             Got a specific question? Ask the AI, and it will answer strictly based on your uploaded notes.
@@ -349,14 +401,14 @@ export default function StudyPage() {
                         <div className="integrated-chat-history card glass" style={{ height: '450px', display: 'flex', flexDirection: 'column' }}>
                             <div style={{ flex: 1, overflowY: 'auto', padding: '10px 5px' }}>
                                 {activeSubject?.chatHistory.length === 0 && !isTyping && (
-                                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center' }}>
-                                        <div style={{ fontSize: '2rem', marginBottom: 12 }}>🖋️</div>
-                                        <p style={{ fontSize: '0.85rem', maxWidth: '240px' }}>Ask anything like "Explain the second chapter" or "What are the key dates?"</p>
+                                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
+                                        <img src={mascotImg} alt="Mascot" style={{ width: 80, height: 80, borderRadius: '50%', marginBottom: 16, border: '1px solid var(--border)', opacity: 0.8 }} />
+                                        <p style={{ fontSize: '0.85rem', maxWidth: '240px' }}>Ask anything like "Explain the second chapter" or "What are the key topics?"</p>
                                     </div>
                                 )}
                                 {activeSubject?.chatHistory.map((msg, i) => (
                                     <div key={i} className={`message ${msg.role === 'user' ? 'user' : 'ai'}`} style={{ marginBottom: 16 }}>
-                                        <div className={`avatar ${msg.role}`}>{msg.role === 'user' ? 'U' : 'AI'}</div>
+                                        <div className={`avatar ${msg.role}`}>{msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}</div>
                                         {msg.role === 'user' ? (
                                             <div className="message-content">
                                                 <div className="message-bubble">{msg.text}</div>
@@ -382,7 +434,9 @@ export default function StudyPage() {
                                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
                                         disabled={isTyping}
                                     />
-                                    <button className="send-btn" onClick={handleChatSend} disabled={!inputText.trim() || isTyping}>↑</button>
+                                    <button className="send-btn" onClick={handleChatSend} disabled={!inputText.trim() || isTyping}>
+                                        <Send size={18} />
+                                    </button>
                                 </div>
                             </div>
                         </div>

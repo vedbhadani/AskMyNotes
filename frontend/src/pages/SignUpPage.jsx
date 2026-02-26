@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { Binary, Mail, Lock, User, UserPlus } from 'lucide-react';
 
 export default function SignUpPage({ onGoSignIn }) {
     const { signUp } = useAuth();
@@ -38,10 +39,7 @@ export default function SignUpPage({ onGoSignIn }) {
                 {/* Logo */}
                 <div className="auth-logo">
                     <div className="logo-mark">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                        </svg>
+                        <Binary size={16} color="var(--bg-primary)" />
                     </div>
                     <span className="auth-logo-name">AskMyNotes</span>
                 </div>
@@ -51,7 +49,9 @@ export default function SignUpPage({ onGoSignIn }) {
 
                 <form className="auth-form" onSubmit={handleSubmit} noValidate>
                     <div className="auth-field">
-                        <label className="auth-label" htmlFor="signup-name">Full name</label>
+                        <label className="auth-label" htmlFor="signup-name" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <User size={12} /> Full name
+                        </label>
                         <input
                             id="signup-name"
                             className="auth-input"
@@ -66,7 +66,9 @@ export default function SignUpPage({ onGoSignIn }) {
                     </div>
 
                     <div className="auth-field">
-                        <label className="auth-label" htmlFor="signup-email">Email</label>
+                        <label className="auth-label" htmlFor="signup-email" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Mail size={12} /> Email
+                        </label>
                         <input
                             id="signup-email"
                             className="auth-input"
@@ -80,7 +82,9 @@ export default function SignUpPage({ onGoSignIn }) {
                     </div>
 
                     <div className="auth-field">
-                        <label className="auth-label" htmlFor="signup-password">Password</label>
+                        <label className="auth-label" htmlFor="signup-password" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Lock size={12} /> Password
+                        </label>
                         <input
                             id="signup-password"
                             className="auth-input"
@@ -94,7 +98,9 @@ export default function SignUpPage({ onGoSignIn }) {
                     </div>
 
                     <div className="auth-field">
-                        <label className="auth-label" htmlFor="signup-confirm">Confirm password</label>
+                        <label className="auth-label" htmlFor="signup-confirm" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Lock size={12} /> Confirm password
+                        </label>
                         <input
                             id="signup-confirm"
                             className="auth-input"
@@ -113,8 +119,9 @@ export default function SignUpPage({ onGoSignIn }) {
                         className="btn btn-primary btn-lg auth-submit"
                         type="submit"
                         disabled={loading}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                     >
-                        {loading ? 'Creating account…' : 'Create account'}
+                        {loading ? 'Creating account…' : <><UserPlus size={18} /> Create account</>}
                     </button>
                 </form>
 

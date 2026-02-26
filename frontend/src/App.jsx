@@ -8,6 +8,7 @@ import StudyPage from './pages/StudyPage';
 import ChatPage from './pages/ChatPage';
 import SignInPage from './pages/SignInPage';
 import SignUpPage from './pages/SignUpPage';
+import { RotateCcw, LogOut, User } from 'lucide-react';
 
 function AppContent() {
   const { currentPage, activeSubject } = useApp();
@@ -45,16 +46,19 @@ function AppContent() {
               <button
                 className="btn btn-secondary btn-sm"
                 onClick={() => window.location.reload()}
+                style={{ display: 'flex', alignItems: 'center', gap: 6 }}
               >
-                Reset Session
+                <RotateCcw size={14} /> RESET SESSION
               </button>
             )}
             {user && (
               <div className="topbar-user">
-                <div className="topbar-avatar">{user.name.charAt(0).toUpperCase()}</div>
+                <div className="topbar-avatar" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  <User size={14} />
+                </div>
                 <span className="topbar-user-name">{user.name}</span>
-                <button className="btn btn-ghost btn-sm" onClick={signOut}>
-                  Sign out
+                <button className="btn btn-ghost btn-sm" onClick={signOut} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <LogOut size={14} /> SIGN OUT
                 </button>
               </div>
             )}

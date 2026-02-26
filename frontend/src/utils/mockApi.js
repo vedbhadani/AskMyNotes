@@ -68,13 +68,14 @@ export async function askQuestion(subjectId, question, subjectName) {
  * @param {string} subjectName
  * @returns {Promise<{mcqs: Array, shortAnswer: Array}>}
  */
-export async function generateStudyContent(subjectId, subjectName) {
+export async function generateStudyContent(subjectId, subjectName, fileName) {
     const response = await fetch("/api/study-mode", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
             subjectId: String(subjectId),
             subjectName,
+            fileName,
         }),
     });
 

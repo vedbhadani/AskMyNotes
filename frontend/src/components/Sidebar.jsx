@@ -1,9 +1,10 @@
 import { useApp } from '../context/AppContext';
+import { Settings, LayoutDashboard, MessageSquare, Binary, ChevronRight, FileText, CheckCircle2, Circle } from 'lucide-react';
 
 const NAV_ITEMS = [
-    { id: 'setup', label: '1. Subject Setup', icon: '⚙️' },
-    { id: 'study', label: '2. Subject Dashboard', icon: '📖' },
-    { id: 'chat', label: '3. Chat with AI', icon: '💬' },
+    { id: 'setup', label: '1. Subject Setup', icon: Settings },
+    { id: 'study', label: '2. Subject Dashboard', icon: LayoutDashboard },
+    { id: 'chat', label: '3. Chat with AI', icon: MessageSquare },
 ];
 
 export default function Sidebar() {
@@ -15,10 +16,7 @@ export default function Sidebar() {
         <aside className="sidebar">
             <div className="sidebar-logo">
                 <div className="logo-mark">
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                        <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                        <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                    </svg>
+                    <Binary size={14} color="var(--bg-primary)" />
                 </div>
                 <h1>AskMyNotes</h1>
             </div>
@@ -31,7 +29,7 @@ export default function Sidebar() {
                         className={`sidebar-nav-btn ${currentPage === item.id ? 'active' : ''}`}
                         onClick={() => setCurrentPage(item.id)}
                     >
-                        <span style={{ marginRight: 8 }}>{item.icon}</span>
+                        <item.icon size={16} style={{ marginRight: 8 }} />
                         {item.label}
                     </button>
                 ))}
@@ -50,6 +48,7 @@ export default function Sidebar() {
                         disabled={!s.name && currentPage !== 'setup'}
                         style={{ display: 'flex', alignItems: 'center', gap: 10, opacity: s.name ? 1 : 0.6 }}
                     >
+                        <FileText size={14} style={{ opacity: 0.7 }} />
                         <div style={{ flex: 1, minWidth: 0, textAlign: 'left' }}>
                             <div style={{
                                 fontSize: '0.82rem', fontWeight: 500,
@@ -65,26 +64,28 @@ export default function Sidebar() {
                             )}
                         </div>
                         {s.name && (
-                            <span style={{
-                                width: 7, height: 7, borderRadius: '50%', flexShrink: 0,
-                                background: s.files.length > 0 ? 'var(--accent-green)' : 'var(--text-muted)'
-                            }} />
+                            s.files.length > 0
+                                ? <CheckCircle2 size={12} color="var(--accent-green)" />
+                                : <Circle size={12} color="var(--text-muted)" />
                         )}
                     </button>
                 ))}
             </div>
 
-            <div style={{ padding: '14px 16px', borderTop: '1px solid var(--border)', fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                <div style={{ fontWeight: 600 }}>Hackathon Integration</div>
+            <div style={{ padding: '24px 20px', borderTop: '1px solid var(--border)', fontSize: '0.7rem', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                <div style={{ color: 'var(--text-secondary)', marginBottom: 4 }}>Hackathon Integration</div>
                 Built with Groq & React
             </div>
 
             <style jsx>{`
                 .active-subject {
-                    background: var(--accent-blue-light) !important;
-                    color: var(--accent-blue) !important;
-                    border-left: 3px solid var(--accent-blue);
-                    border-radius: 0 4px 4px 0;
+                    color: var(--accent-neon) !important;
+                    border-left: 2px solid var(--accent-neon);
+                    background: var(--bg-hover) !important;
+                }
+                .sidebar-nav-btn span {
+                    font-family: 'JetBrains Mono', monospace;
+                    color: var(--accent-neon);
                 }
             `}</style>
         </aside>

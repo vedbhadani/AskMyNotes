@@ -10,15 +10,14 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
 });
 
-// ─── ROUTE: Chat Q&A ────────────────────────────────────────────────────────
+
 router.post("/chat", async (req, res) => {
     try {
         const { subjectId, question, subjectName } = req.body;
 
-        // Get combined text from MongoDB
         const subjectText = await getSubjectText(subjectId);
 
-        // Resolve subject name
+
         let name = subjectName;
         if (!name) {
             const subject = await Subject.findOne({ subjectId: String(subjectId) });
@@ -52,7 +51,6 @@ Respond in JSON:
 
         const response = JSON.parse(completion.choices[0].message.content);
 
-        // Save to history (non-blocking, best-effort)
         ChatHistory.create({
             subjectId: String(subjectId),
             question,

@@ -1,6 +1,8 @@
 import { useState, useRef } from 'react';
+import mascotImg from '../assets/Screenshot 2026-02-26 at 18.28.04.png';
 import { useApp } from '../context/AppContext';
 import { uploadSubjectFiles, clearSubjectFiles } from '../utils/mockApi';
+import { X, UploadCloud, FileText, Plus, ChevronRight, CheckCircle2, Circle, BookOpen, Layers } from 'lucide-react';
 
 function formatFileSize(bytes) {
     if (bytes < 1024) return bytes + ' B';
@@ -8,7 +10,7 @@ function formatFileSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-function SubjectCard({ subject, index, canRemove }) {
+function SubjectCard({ subject, index, canRemove, onStartAsking, isProcessing }) {
     const { updateSubject, addFiles, removeFile, removeSubject } = useApp();
     const fileInputRef = useRef(null);
     const [dragOver, setDragOver] = useState(false);
@@ -20,6 +22,8 @@ function SubjectCard({ subject, index, canRemove }) {
         if (accepted.length > 0) addFiles(subject.id, accepted);
     };
 
+    const canStart = subject.name.trim() && subject.files.length > 0;
+
     return (
         <div className="subject-card">
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
@@ -29,9 +33,9 @@ function SubjectCard({ subject, index, canRemove }) {
                         className="remove-btn"
                         onClick={() => removeSubject(subject.id)}
                         title="Remove this subject"
-                        style={{ fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', background: 'none', border: 'none', padding: '2px 6px' }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.75rem', color: 'var(--text-muted)', cursor: 'pointer', background: 'none', border: 'none', padding: '2px 6px' }}
                     >
-                        ✕ Remove
+                        <X size={12} /> REMOVE
                     </button>
                 )}
             </div>
@@ -41,6 +45,7 @@ function SubjectCard({ subject, index, canRemove }) {
                 value={subject.name}
                 onChange={e => updateSubject(subject.id, { name: e.target.value })}
                 maxLength={40}
+                style={{ marginBottom: 16 }}
             />
 
             <div
@@ -49,9 +54,11 @@ function SubjectCard({ subject, index, canRemove }) {
                 onDragOver={e => { e.preventDefault(); setDragOver(true); }}
                 onDragLeave={() => setDragOver(false)}
                 onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+                style={{ marginBottom: 16 }}
             >
-                <p>Drop files or <span>browse</span></p>
-                <p style={{ marginTop: 2, fontSize: '0.67rem' }}>PDF, TXT · Multiple files allowed</p>
+                <UploadCloud size={24} color="var(--accent-neon)" style={{ marginBottom: 12 }} />
+                <p>Drop PDF/Text or <span>browse</span></p>
+                <p style={{ marginTop: 4, fontSize: '0.67rem', opacity: 0.6 }}>Multiple files allowed</p>
                 <input
                     ref={fileInputRef}
                     type="file"
@@ -62,143 +69,131 @@ function SubjectCard({ subject, index, canRemove }) {
             </div>
 
             {subject.files.length > 0 && (
-                <div className="file-list">
+                <div className="file-list" style={{ marginBottom: 16 }}>
                     {subject.files.map((f, i) => (
                         <div key={i} className="file-item">
+                            <FileText size={14} style={{ opacity: 0.7 }} />
                             <span title={f.name}>{f.name}</span>
                             <span className="file-size">{formatFileSize(f.size)}</span>
-                            <button className="remove-btn" onClick={() => removeFile(subject.id, i)}>✕</button>
+                            <button className="remove-btn" onClick={() => removeFile(subject.id, i)}><X size={14} /></button>
                         </div>
                     ))}
                 </div>
             )}
 
-            {subject.uploaded && subject.files.length > 0 && (
-                <div style={{
-                    marginTop: 6, fontSize: '0.7rem', color: 'var(--accent-green)',
-                    display: 'flex', alignItems: 'center', gap: 4
-                }}>
-                    ✓ Files processed by AI
-                </div>
-            )}
+            <button
+                className="btn btn-primary"
+                onClick={() => onStartAsking(subject.id)}
+                disabled={!canStart || isProcessing}
+                style={{ width: '100%', marginTop: 'auto', gap: 8, height: 44 }}
+            >
+                {isProcessing ? 'PROCESSING...' : (
+                    <>
+                        START ASKING <ChevronRight size={16} />
+                    </>
+                )}
+            </button>
         </div>
     );
 }
 
 export default function SetupPage() {
-    const { subjects, checkSetupComplete, setCurrentPage, markUploaded, addSubject } = useApp();
-    const [uploading, setUploading] = useState(false);
+    const { subjects, setActiveSubjectId, setCurrentPage, markUploaded, addSubject } = useApp();
+    const [uploadingId, setUploadingId] = useState(null);
     const [uploadError, setUploadError] = useState('');
 
     const totalFiles = subjects.reduce((acc, s) => acc + s.files.length, 0);
     const namedCount = subjects.filter(s => s.name.trim()).length;
     const canAddMore = subjects.length < 3;
 
-    const handleProceed = async () => {
-        if (!checkSetupComplete()) return;
-        setUploading(true);
+    const handleStartAsking = async (subjectId) => {
+        const subject = subjects.find(s => s.id === subjectId);
+        if (!subject || !subject.name.trim() || subject.files.length === 0) return;
+
+        setUploadingId(subjectId);
         setUploadError('');
+        setActiveSubjectId(subjectId);
 
         try {
-            // Only upload for named subjects that have files
-            const namedSubjects = subjects.filter(s => s.name.trim());
-
-            for (const subject of namedSubjects) {
-                if (subject.files.length > 0 && !subject.uploaded) {
-                    await clearSubjectFiles(subject.id);
-                    await uploadSubjectFiles(subject.id, subject.name, subject.files);
-                    markUploaded(subject.id);
-                } else if (subject.files.length === 0) {
-                    await clearSubjectFiles(subject.id);
-                }
+            if (!subject.uploaded) {
+                await clearSubjectFiles(subject.id);
+                await uploadSubjectFiles(subject.id, subject.name, subject.files);
+                markUploaded(subject.id);
             }
-
             setCurrentPage('study');
         } catch (err) {
             console.error('Upload error:', err);
             setUploadError(err.message || 'Failed to upload files. Make sure the backend server is running.');
         } finally {
-            setUploading(false);
+            setUploadingId(null);
         }
     };
 
     return (
         <div className="page-content">
-            <div className="welcome-banner">
-                <h2>Set up your subjects</h2>
-                <p>
-                    Name at least one subject and upload your notes. You can add up to 3 subjects.
-                    Once ready, you can ask questions and get answers grounded strictly in your uploaded material.
-                </p>
+            <div className="welcome-banner glass" style={{ borderLeft: '4px solid var(--accent-neon)', display: 'flex', alignItems: 'center', gap: 24, padding: '24px 32px' }}>
+                <div style={{ flex: 1 }}>
+                    <h2 style={{ fontFamily: 'JetBrains Mono, monospace', textTransform: 'uppercase', color: 'var(--accent-neon)', marginBottom: 12 }}>Welcome to AskMyNotes</h2>
+                    <p style={{ color: 'var(--text-secondary)', lineHeight: '1.6' }}>
+                        Your AI-powered study companion. Upload your notes, and we'll generate customized dashboards,
+                        MCQ quizzes, and provide answers grounded strictly in your material.
+                    </p>
+                </div>
+                <img src={mascotImg} alt="Mascot" style={{ width: 120, height: 120, borderRadius: '50%', border: '2px solid var(--accent-neon)', boxShadow: 'var(--glow)', objectFit: 'cover' }} />
             </div>
 
-            <div className="stat-row">
-                <div className="stat-mini">
-                    <div className="val">{namedCount}<span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>/{subjects.length}</span></div>
-                    <div className="lbl">Subjects named</div>
-                    <div className="progress-bar">
-                        <div className="progress-fill" style={{ width: `${namedCount > 0 ? (namedCount / subjects.length) * 100 : 0}%` }} />
+            <div className="stat-row" style={{ display: 'flex', gap: 32, marginBottom: 48, marginTop: 40 }}>
+                <div className="stat-mini" style={{ flex: 1, padding: '24px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', position: 'relative', overflow: 'hidden' }}>
+                    <Layers size={40} style={{ position: 'absolute', right: -10, bottom: -10, opacity: 0.05 }} />
+                    <div className="lbl" style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <BookOpen size={12} /> Subjects named
+                    </div>
+                    <div className="val" style={{ fontSize: '1.5rem', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>{namedCount}<span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/{subjects.length}</span></div>
+                    <div style={{ height: 2, background: 'var(--border)', marginTop: 12 }}>
+                        <div style={{ height: '100%', background: 'var(--accent-neon)', width: `${namedCount > 0 ? (namedCount / subjects.length) * 100 : 0}%`, transition: 'var(--transition)' }} />
                     </div>
                 </div>
-                <div className="stat-mini">
-                    <div className="val">{totalFiles}</div>
-                    <div className="lbl">Files uploaded</div>
+                <div className="stat-mini" style={{ flex: 1, padding: '24px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', position: 'relative', overflow: 'hidden' }}>
+                    <FileText size={40} style={{ position: 'absolute', right: -10, bottom: -10, opacity: 0.05 }} />
+                    <div className="lbl" style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <FileText size={12} /> Files uploaded
+                    </div>
+                    <div className="val" style={{ fontSize: '1.5rem', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>{totalFiles}</div>
                 </div>
-                <div className="stat-mini">
-                    <div className="val">{subjects.filter(s => s.files.length > 0).length}<span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>/{subjects.length}</span></div>
-                    <div className="lbl">Subjects with notes</div>
+                <div className="stat-mini" style={{ flex: 1, padding: '24px', background: 'var(--bg-secondary)', border: '1px solid var(--border)', position: 'relative', overflow: 'hidden' }}>
+                    <CheckCircle2 size={40} style={{ position: 'absolute', right: -10, bottom: -10, opacity: 0.05 }} />
+                    <div className="lbl" style={{ fontFamily: 'JetBrains Mono, monospace', fontSize: '0.7rem', color: 'var(--text-muted)', textTransform: 'uppercase', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <CheckCircle2 size={12} /> Subjects with notes
+                    </div>
+                    <div className="val" style={{ fontSize: '1.5rem', fontWeight: 700, fontFamily: 'JetBrains Mono, monospace' }}>{subjects.filter(s => s.files.length > 0).length}<span style={{ fontSize: '0.9rem', color: 'var(--text-muted)' }}>/{subjects.length}</span></div>
                 </div>
             </div>
 
-            <div className="subjects-grid" style={{ gridTemplateColumns: `repeat(${Math.min(subjects.length, 3)}, 1fr)` }}>
+            <div className="subjects-grid" style={{ gridTemplateColumns: `repeat(auto-fill, minmax(300px, 1fr))` }}>
                 {subjects.map((s, i) => (
-                    <SubjectCard key={s.id} subject={s} index={i} canRemove={subjects.length > 1} />
+                    <SubjectCard
+                        key={s.id}
+                        subject={s}
+                        index={i}
+                        canRemove={subjects.length > 1}
+                        onStartAsking={handleStartAsking}
+                        isProcessing={uploadingId === s.id}
+                    />
                 ))}
-            </div>
 
-            {canAddMore && (
-                <div style={{ textAlign: 'center', marginBottom: 16 }}>
-                    <button className="btn btn-secondary" onClick={addSubject}>
-                        + Add Subject ({subjects.length}/3)
-                    </button>
-                </div>
-            )}
-
-            <div className="setup-action-bar">
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                    {subjects.map((s, i) => (
-                        <div key={s.id} className="setup-status">
-                            <span className={`setup-dot ${s.name ? 'done' : 'pending'}`} />
-                            <span style={{ color: s.name ? 'var(--text-primary)' : 'var(--text-muted)' }}>
-                                {s.name ? `"${s.name}"` : `Subject ${i + 1} — not named`}
-                            </span>
-                            {s.files.length > 0 && (
-                                <span className="tag" style={{ marginLeft: 6 }}>
-                                    {s.files.length} file{s.files.length !== 1 ? 's' : ''}
-                                </span>
-                            )}
+                {canAddMore && (
+                    <div className="add-subject-card" onClick={addSubject}>
+                        <div className="plus-icon">
+                            <Plus size={24} />
                         </div>
-                    ))}
-                </div>
-
-                <button
-                    className="btn btn-primary btn-lg"
-                    onClick={handleProceed}
-                    disabled={namedCount < 1 || uploading}
-                >
-                    {uploading ? 'Processing Files...' : 'Start Asking'}
-                </button>
+                        <span>Add Subject ({subjects.length}/3)</span>
+                    </div>
+                )}
             </div>
 
             {uploadError && (
-                <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--accent-red)', marginTop: 10, padding: '8px 14px', background: 'var(--accent-red-light)', borderRadius: 6 }}>
+                <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--accent-red)', marginTop: 24, padding: '12px', background: 'var(--accent-red-dim)', border: '1px solid var(--accent-red)', borderRadius: 6 }}>
                     ⚠️ {uploadError}
-                </p>
-            )}
-
-            {namedCount < 1 && (
-                <p style={{ textAlign: 'center', fontSize: '0.76rem', color: 'var(--text-muted)', marginTop: 10 }}>
-                    Name at least 1 subject to continue
                 </p>
             )}
         </div>

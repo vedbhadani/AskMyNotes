@@ -9,13 +9,13 @@ const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
 });
 
-// ─── ROUTE: Study Mode (Dashboard Generation) ──────────────────────────────
+
 router.post("/study-mode", async (req, res) => {
     try {
-        const { subjectId, subjectName } = req.body;
+        const { subjectId, subjectName, fileName } = req.body;
 
-        // Get combined text from MongoDB
-        const subjectText = await getSubjectText(subjectId);
+        // Get text (either specific file or combined subject text)
+        const subjectText = await getSubjectText(subjectId, fileName);
 
         // Resolve subject name
         let name = subjectName;

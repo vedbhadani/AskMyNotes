@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
+import { Binary, Mail, Lock, LogIn } from 'lucide-react';
 
 export default function SignInPage({ onGoSignUp }) {
     const { signIn } = useAuth();
@@ -28,10 +29,7 @@ export default function SignInPage({ onGoSignUp }) {
                 {/* Logo */}
                 <div className="auth-logo">
                     <div className="logo-mark">
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
-                            <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
-                        </svg>
+                        <Binary size={16} color="var(--bg-primary)" />
                     </div>
                     <span className="auth-logo-name">AskMyNotes</span>
                 </div>
@@ -41,7 +39,9 @@ export default function SignInPage({ onGoSignUp }) {
 
                 <form className="auth-form" onSubmit={handleSubmit} noValidate>
                     <div className="auth-field">
-                        <label className="auth-label" htmlFor="signin-email">Email</label>
+                        <label className="auth-label" htmlFor="signin-email" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Mail size={12} /> Email
+                        </label>
                         <input
                             id="signin-email"
                             className="auth-input"
@@ -56,7 +56,9 @@ export default function SignInPage({ onGoSignUp }) {
                     </div>
 
                     <div className="auth-field">
-                        <label className="auth-label" htmlFor="signin-password">Password</label>
+                        <label className="auth-label" htmlFor="signin-password" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <Lock size={12} /> Password
+                        </label>
                         <input
                             id="signin-password"
                             className="auth-input"
@@ -75,8 +77,9 @@ export default function SignInPage({ onGoSignUp }) {
                         className="btn btn-primary btn-lg auth-submit"
                         type="submit"
                         disabled={loading}
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
                     >
-                        {loading ? 'Signing in…' : 'Sign in'}
+                        {loading ? 'Signing in…' : <><LogIn size={18} /> Sign in</>}
                     </button>
                 </form>
 
