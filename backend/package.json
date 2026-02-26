@@ -1,7 +1,7 @@
 {
     "name": "askmynotes-backend",
-    "version": "1.0.0",
-    "description": "AskMyNotes backend — PDF/TXT extraction + Groq AI",
+    "version": "2.0.0",
+    "description": "AskMyNotes backend — PDF/TXT extraction + Groq AI + MongoDB + Cloudinary",
     "main": "server.js",
     "type": "commonjs",
     "scripts": {
@@ -9,10 +9,12 @@
         "dev": "node server.js"
     },
     "dependencies": {
+        "cloudinary": "^2.5.1",
         "cors": "^2.8.6",
         "dotenv": "^17.3.1",
         "express": "^5.2.1",
         "groq-sdk": "^0.37.0",
+        "mongoose": "^8.13.2",
         "multer": "^2.0.2",
         "pdf-parse": "^2.4.5"
     }
