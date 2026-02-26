@@ -1,65 +1,59 @@
 import { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
 const AuthContext = createContext(null);
 
-const USERS_KEY = 'askmynotes_users';
-const SESSION_KEY = 'askmynotes_session';
-
-function getUsers() {
-  try {
-    return JSON.parse(localStorage.getItem(USERS_KEY)) || [];
-  } catch {
-    return [];
-  }
-}
-
-function saveUsers(users) {
-  localStorage.setItem(USERS_KEY, JSON.stringify(users));
-}
+const API_URL = 'http://localhost:3001/api/auth';
+const TOKEN_KEY = 'askmynotes_token';
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    // Restore session on mount
-    try {
-      const session = JSON.parse(localStorage.getItem(SESSION_KEY));
-      if (session) setUser(session);
-    } catch {
-      /* ignore */
-    }
-    setLoading(false);
+    const restoreSession = async () => {
+      const token = localStorage.getItem(TOKEN_KEY);
+      if (token) {
+        try {
+          const res = await axios.get(`${API_URL}/me`, {
+            headers: { Authorization: `Bearer ${token}` }
+          });
+          setUser(res.data);
+        } catch (err) {
+          localStorage.removeItem(TOKEN_KEY);
+        }
+      }
+      setLoading(false);
+    };
+    restoreSession();
   }, []);
 
-  const signUp = ({ name, email, password }) => {
-    const users = getUsers();
-    if (users.find(u => u.email.toLowerCase() === email.toLowerCase())) {
-      return { error: 'An account with this email already exists.' };
+  const signUp = async ({ name, email, password }) => {
+    try {
+      const res = await axios.post(`${API_URL}/register`, { name, email, password });
+      const { token, user: newUser } = res.data;
+      localStorage.setItem(TOKEN_KEY, token);
+      setUser(newUser);
+      return { success: true };
+    } catch (err) {
+      return { error: err.response?.data?.message || 'Registration failed.' };
     }
-    const newUser = { id: Date.now().toString(), name, email, createdAt: new Date().toISOString() };
-    saveUsers([...users, { ...newUser, password }]);
-    localStorage.setItem(SESSION_KEY, JSON.stringify(newUser));
-    setUser(newUser);
-    return { success: true };
   };
 
-  const signIn = ({ email, password }) => {
-    const users = getUsers();
-    const found = users.find(
-      u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-    );
-    if (!found) {
-      return { error: 'Invalid email or password.' };
+  const signIn = async ({ email, password }) => {
+    try {
+      const res = await axios.post(`${API_URL}/login`, { email, password });
+      const { token, user: foundUser } = res.data;
+      localStorage.setItem(TOKEN_KEY, token);
+      setUser(foundUser);
+      return { success: true };
+    } catch (err) {
+      return { error: err.response?.data?.message || 'Invalid email or password.' };
     }
-    const session = { id: found.id, name: found.name, email: found.email, createdAt: found.createdAt };
-    localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-    setUser(session);
-    return { success: true };
   };
 
   const signOut = () => {
-    localStorage.removeItem(SESSION_KEY);
+    localStorage.removeItem(TOKEN_KEY);
     setUser(null);
   };
 

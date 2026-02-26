@@ -2,6 +2,7 @@
  * Real API utilities — connects to the Express backend.
  * Backend runs on port 3001, Vite proxies /api/* to it.
  */
+import api from './api';
 
 /**
  * Upload files for a subject to the backend.
@@ -12,27 +13,17 @@
  * @param {File[]} files
  * @returns {Promise<{success: boolean, files: Array, totalTexts: number}>}
  */
-export async function uploadSubjectFiles(subjectId, subjectName, files) {
+export const uploadSubjectFiles = async (subjectId, subjectName, files) => {
     const formData = new FormData();
-    formData.append("subjectId", String(subjectId));
+    formData.append("subjectId", subjectId);
     formData.append("subjectName", subjectName);
+    files.forEach((file) => formData.append("files", file));
 
-    files.forEach((file) => {
-        formData.append("files", file);
+    const response = await api.post("/upload", formData, {
+        headers: { "Content-Type": "multipart/form-data" },
     });
-
-    const response = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-    });
-
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Upload failed" }));
-        throw new Error(err.error || "Upload failed");
-    }
-
-    return response.json();
-}
+    return response.data;
+};
 
 /**
  * Send a chat question scoped to a specific subject.
@@ -42,24 +33,14 @@ export async function uploadSubjectFiles(subjectId, subjectName, files) {
  * @param {string} subjectName
  * @returns {Promise<{answer?: string, confidence?: string, evidence?: string[], citations?: string[], notFound?: boolean, subjectName?: string}>}
  */
-export async function askQuestion(subjectId, question, subjectName) {
-    const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            subjectId: String(subjectId),
-            question,
-            subjectName,
-        }),
+export const askQuestion = async (subjectId, question, subjectName) => {
+    const response = await api.post("/chat", {
+        subjectId,
+        question,
+        subjectName,
     });
-
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Chat failed" }));
-        throw new Error(err.error || "Chat request failed");
-    }
-
-    return response.json();
-}
+    return response.data;
+};
 
 /**
  * Generate study content (MCQs + short answer) for a subject.
@@ -68,36 +49,53 @@ export async function askQuestion(subjectId, question, subjectName) {
  * @param {string} subjectName
  * @returns {Promise<{mcqs: Array, shortAnswer: Array}>}
  */
-export async function generateStudyContent(subjectId, subjectName, fileName) {
-    const response = await fetch("/api/study-mode", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-            subjectId: String(subjectId),
-            subjectName,
-            fileName,
-        }),
+export const generateStudyContent = async (subjectId, subjectName, fileName, mode) => {
+    const response = await api.post("/study-mode", {
+        subjectId,
+        subjectName,
+        fileName,
+        mode,
     });
-
-    if (!response.ok) {
-        const err = await response.json().catch(() => ({ error: "Study mode failed" }));
-        throw new Error(err.error || "Study mode failed");
-    }
-
-    return response.json();
-}
+    return response.data;
+};
 
 /**
  * Clear stored texts for a subject (for re-upload).
  *
  * @param {number|string} subjectId
  */
-export async function clearSubjectFiles(subjectId) {
-    const response = await fetch("/api/clear-subject", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subjectId: String(subjectId) }),
-    });
+export const clearSubjectFiles = async (subjectId) => {
+    const response = await api.post("/clear-subject", { subjectId });
+    return response.data;
+};
 
-    return response.json();
-}
+/**
+ * Fetch all subjects for the current user.
+ */
+export const fetchSubjects = async () => {
+    const response = await api.get("/subjects");
+    return response.data;
+};
+
+/**
+ * Delete an entire subject.
+ */
+export const deleteSubject = async (subjectId) => {
+    const response = await api.delete(`/subjects/${subjectId}`);
+    return response.data;
+};
+
+/**
+ * Delete a specific file from a subject.
+ */
+export const deleteFile = async (subjectId, fileName) => {
+    const response = await api.delete(`/subjects/${subjectId}/files/${fileName}`);
+    return response.data;
+};
+/**
+ * Fetch the full text content of a specific file.
+ */
+export const fetchFileContent = async (subjectId, fileName) => {
+    const response = await api.get(`/subjects/${subjectId}/files/${fileName}/content`);
+    return response.data;
+};

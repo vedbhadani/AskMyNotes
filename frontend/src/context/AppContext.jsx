@@ -1,4 +1,5 @@
-import { createContext, useContext, useState } from 'react';
+import { createContext, useContext, useState, useEffect } from 'react';
+import { fetchSubjects, deleteSubject as apiDeleteSubject, deleteFile as apiDeleteFile } from '../utils/mockApi';
 
 const SUBJECT_COLORS = ['s0', 's1', 's2'];
 const SUBJECT_ICONS = ['📘', '🧪', '📐'];
@@ -6,27 +7,67 @@ const SUBJECT_ICONS = ['📘', '🧪', '📐'];
 const AppContext = createContext(null);
 
 export function AppProvider({ children }) {
-  // Start with just 1 subject — user can add up to 3
-  const [subjects, setSubjects] = useState([
-    { id: 0, name: '', description: '', files: [], color: 's0', icon: '📘', chatHistory: [], uploaded: false },
-  ]);
-  const [activeSubjectId, setActiveSubjectId] = useState(0);
-  const [currentPage, setCurrentPage] = useState('setup'); // 'setup' | 'chat' | 'study'
+  const [subjects, setSubjects] = useState([]);
+  const [activeSubjectId, setActiveSubjectId] = useState(null);
+  const [currentPage, setCurrentPage] = useState('setup');
+  const [loading, setLoading] = useState(true);
+
+  const loadSubjects = async () => {
+    try {
+      const data = await fetchSubjects();
+      if (data.length > 0) {
+        setSubjects(data.map(s => ({
+          ...s,
+          chatHistory: s.chatHistory || [],
+          uploaded: s.files?.length > 0,
+          contentCache: s.contentCache || {}
+        })));
+        setActiveSubjectId(data[0].id);
+      } else {
+        // Default initial subject if none exist
+        setSubjects([{ id: 0, name: '', description: '', files: [], color: 's0', icon: '📘', chatHistory: [], uploaded: false, contentCache: {} }]);
+        setActiveSubjectId(0);
+      }
+    } catch (err) {
+      console.error("Failed to load subjects:", err);
+      // Fallback
+      setSubjects([{ id: 0, name: '', description: '', files: [], color: 's1', icon: '📐', chatHistory: [], uploaded: false, contentCache: {} }]);
+      setActiveSubjectId(0);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadSubjects();
+  }, []);
 
   const updateSubject = (id, fields) =>
     setSubjects(prev => prev.map(s => (s.id === id ? { ...s, ...fields } : s)));
 
   const addFiles = (id, newFiles) =>
     setSubjects(prev =>
-      prev.map(s => (s.id === id ? { ...s, files: [...s.files, ...newFiles], uploaded: false } : s))
+      prev.map(s => (s.id === id ? { ...s, files: [...s.files, ...newFiles], uploaded: false, contentCache: {} } : s))
     );
 
-  const removeFile = (subjectId, fileIdx) =>
+  const removeFile = async (subjectId, fileIdx) => {
+    const subject = subjects.find(s => s.id === subjectId);
+    if (subject && subject.files[fileIdx]) {
+      const fileName = subject.files[fileIdx].name;
+      if (subject.uploaded) {
+        try {
+          await apiDeleteFile(subjectId, fileName);
+        } catch (err) {
+          console.error("Failed to delete file from backend:", err);
+        }
+      }
+    }
     setSubjects(prev =>
       prev.map(s =>
-        s.id === subjectId ? { ...s, files: s.files.filter((_, i) => i !== fileIdx), uploaded: false } : s
+        s.id === subjectId ? { ...s, files: s.files.filter((_, i) => i !== fileIdx), uploaded: false, contentCache: {} } : s
       )
     );
+  };
 
   const markUploaded = (subjectId) =>
     setSubjects(prev =>
@@ -40,39 +81,46 @@ export function AppProvider({ children }) {
       )
     );
 
-  // Add a new subject (up to 3)
   const addSubject = () => {
     if (subjects.length >= 3) return;
-    const nextId = Math.max(...subjects.map(s => s.id)) + 1;
+    const existingIds = subjects.map(s => Number(s.id)).filter(n => !isNaN(n));
+    const nextId = existingIds.length > 0 ? Math.max(...existingIds) + 1 : 0;
     const idx = subjects.length;
     setSubjects(prev => [
       ...prev,
-      { id: nextId, name: '', description: '', files: [], color: SUBJECT_COLORS[idx] || 's0', icon: SUBJECT_ICONS[idx] || '📘', chatHistory: [], uploaded: false },
+      { id: nextId, name: '', description: '', files: [], color: SUBJECT_COLORS[idx] || 's0', icon: SUBJECT_ICONS[idx] || '📘', chatHistory: [], uploaded: false, contentCache: {} },
     ]);
   };
 
-  // Remove a subject
-  const removeSubject = (id) => {
-    if (subjects.length <= 1) return; // must keep at least 1
+  const removeSubject = async (id) => {
+    if (subjects.length <= 1) return;
+
+    const subject = subjects.find(s => s.id === id);
+    if (subject && subject.uploaded) {
+      try {
+        await apiDeleteSubject(id);
+      } catch (err) {
+        console.error("Failed to delete subject from backend:", err);
+      }
+    }
+
     setSubjects(prev => prev.filter(s => s.id !== id));
     if (activeSubjectId === id) {
-      setActiveSubjectId(subjects.find(s => s.id !== id)?.id ?? 0);
+      const remaining = subjects.filter(s => s.id !== id);
+      setActiveSubjectId(remaining[0]?.id ?? 0);
     }
   };
 
   const activeSubject = subjects.find(s => s.id === activeSubjectId);
-
-  // Derived live — always accurate, no stale state
-  const configuredSubjects = subjects.filter(s => s.name.trim() !== '');
+  const configuredSubjects = subjects.filter(s => s.name?.trim() !== '');
   const isSetupComplete = configuredSubjects.length > 0;
-
-  // Returns whether setup is complete (kept for backward compat with SetupPage)
   const checkSetupComplete = () => isSetupComplete;
 
   return (
     <AppContext.Provider
       value={{
         subjects,
+        loading,
         configuredSubjects,
         isSetupComplete,
         activeSubjectId,
@@ -88,6 +136,7 @@ export function AppProvider({ children }) {
         addSubject,
         removeSubject,
         checkSetupComplete,
+        refreshSubjects: loadSubjects,
         SUBJECT_ICONS,
         SUBJECT_COLORS,
       }}
