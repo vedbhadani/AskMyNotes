@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import { generateMockAnswer } from '../utils/mockApi';
+import { askQuestion } from '../utils/mockApi';
+import { marked } from 'marked';
 
 function TypingIndicator() {
     return (
@@ -44,7 +45,7 @@ function AnswerMessage({ msg }) {
             <div className="avatar ai">AI</div>
             <div className="message-content">
                 <div className="message-bubble">
-                    <p style={{ marginBottom: 10 }}>{data?.answer}</p>
+                    <div dangerouslySetInnerHTML={{ __html: marked.parse(data?.answer || '') }} />
 
                     <div className="answer-meta">
                         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -52,7 +53,7 @@ function AnswerMessage({ msg }) {
                                 {data?.confidence} Confidence
                             </span>
                             <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                {data?.citations?.length} source{data?.citations?.length !== 1 ? 's' : ''}
+                                {data?.citations?.length || 0} source{(data?.citations?.length || 0) !== 1 ? 's' : ''}
                             </span>
                         </div>
 
@@ -101,16 +102,31 @@ export default function ChatPage() {
         setInputText('');
         setIsTyping(true);
 
-        await new Promise(r => setTimeout(r, 1200 + Math.random() * 600));
+        try {
+            const response = await askQuestion(activeSubjectId, text, activeSubject?.name);
 
-        const response = generateMockAnswer(text, activeSubject);
-        addMessage(activeSubjectId, {
-            role: 'ai',
-            text: response.answer || '',
-            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            data: response,
-        });
-        setIsTyping(false);
+            addMessage(activeSubjectId, {
+                role: 'ai',
+                text: response.answer || '',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                data: response,
+            });
+        } catch (err) {
+            console.error('Chat error:', err);
+            addMessage(activeSubjectId, {
+                role: 'ai',
+                text: '',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                data: {
+                    answer: `⚠️ Error: ${err.message}. Make sure the backend server is running.`,
+                    confidence: 'Low',
+                    evidence: [],
+                    citations: [],
+                },
+            });
+        } finally {
+            setIsTyping(false);
+        }
     };
 
     const handleKeyDown = (e) => {

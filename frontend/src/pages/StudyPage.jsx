@@ -1,7 +1,10 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useApp } from '../context/AppContext';
-import { generateStudyContent } from '../utils/mockApi';
+import { generateStudyContent, askQuestion } from '../utils/mockApi';
+import { marked } from 'marked';
+import { jsPDF } from 'jspdf';
 
+// --- MCQ Components ---
 function MCQCard({ q, index }) {
     const [selected, setSelected] = useState(null);
     const [revealed, setRevealed] = useState(false);
@@ -13,7 +16,7 @@ function MCQCard({ q, index }) {
     };
 
     return (
-        <div className="mcq-card">
+        <div className="mcq-card animate-fade-in" style={{ animationDelay: `${index * 0.1}s` }}>
             <div className="mcq-num">{index + 1}</div>
             <div className="mcq-question">{q.question}</div>
             <div className="mcq-options">
@@ -47,7 +50,7 @@ function ShortAnsCard({ q, index }) {
     const [revealed, setRevealed] = useState(false);
 
     return (
-        <div className="short-ans-card">
+        <div className="short-ans-card animate-fade-in">
             <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 9 }}>
                 <div className="mcq-num" style={{ background: '#ebfbee', color: 'var(--accent-green)' }}>{index + 1}</div>
             </div>
@@ -66,18 +69,173 @@ function ShortAnsCard({ q, index }) {
     );
 }
 
+// --- Chat Components ---
+function TypingIndicator() {
+    return (
+        <div className="message ai">
+            <div className="avatar ai">AI</div>
+            <div className="typing-indicator">
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+                <div className="typing-dot" />
+            </div>
+        </div>
+    );
+}
+
+function AnswerMessage({ msg }) {
+    const data = msg.data;
+    if (data?.notFound) {
+        return (
+            <div className="message-content">
+                <div className="message-bubble">
+                    <div className="not-found-block">
+                        <div>
+                            <div style={{ fontWeight: 600 }}>Not found in your notes</div>
+                            <div style={{ fontSize: '0.79rem', marginTop: 4, opacity: 0.85 }}>
+                                The uploaded notes don't contain sufficient information to answer this question.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        );
+    }
+
+    return (
+        <div className="message-content">
+            <div className="message-bubble">
+                <div dangerouslySetInnerHTML={{ __html: marked.parse(data?.answer || '') }} />
+                <div className="answer-meta">
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <span className={`confidence-badge ${data?.confidence?.toLowerCase()}`}>
+                            {data?.confidence} Confidence
+                        </span>
+                    </div>
+                    {data?.evidence?.length > 0 && (
+                        <div className="evidence-block" style={{ marginTop: 8 }}>
+                            <div className="evidence-label">Supporting Evidence</div>
+                            {data.evidence.map((e, i) => (
+                                <div key={i} className="evidence-snippet">"{e}"</div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
+            <div className="message-time">{msg.time}</div>
+        </div>
+    );
+}
+
 export default function StudyPage() {
-    const { subjects, activeSubjectId, setActiveSubjectId, activeSubject, setCurrentPage, isSetupComplete } = useApp();
+    const { subjects, activeSubjectId, setActiveSubjectId, activeSubject, setCurrentPage, isSetupComplete, addMessage } = useApp();
     const [content, setContent] = useState(null);
     const [loading, setLoading] = useState(false);
+    const [error, setError] = useState('');
 
-    useEffect(() => { setContent(null); }, [activeSubjectId]);
+    // Chat state
+    const [inputText, setInputText] = useState('');
+    const [isTyping, setIsTyping] = useState(false);
+    const messagesEndRef = useRef(null);
+    const textareaRef = useRef(null);
 
-    const generateContent = async () => {
+    // Auto-generate content when subject changes
+    useEffect(() => {
+        setContent(null);
+        setError('');
+        if (activeSubject && activeSubject.name && activeSubject.files.length > 0) {
+            handleGenerate();
+        }
+    }, [activeSubjectId]);
+
+    useEffect(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [activeSubject?.chatHistory, isTyping]);
+
+    const handleGenerate = async () => {
         setLoading(true);
-        await new Promise(r => setTimeout(r, 1200));
-        setContent(generateStudyContent(activeSubject));
-        setLoading(false);
+        setError('');
+        try {
+            const result = await generateStudyContent(activeSubjectId, activeSubject?.name);
+            setContent(result);
+        } catch (err) {
+            console.error('Study mode error:', err);
+            setError(err.message || 'Failed to generate study content.');
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const handleChatSend = async () => {
+        const text = inputText.trim();
+        if (!text || isTyping) return;
+
+        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        addMessage(activeSubjectId, { role: 'user', text, time });
+        setInputText('');
+        setIsTyping(true);
+
+        try {
+            const response = await askQuestion(activeSubjectId, text, activeSubject?.name);
+            addMessage(activeSubjectId, {
+                role: 'ai',
+                text: response.answer || '',
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                data: response,
+            });
+        } catch (err) {
+            console.error('Chat error:', err);
+            addMessage(activeSubjectId, {
+                role: 'ai',
+                text: `⚠️ Error: ${err.message}`,
+                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                data: { answer: `Error: ${err.message}`, confidence: 'Low' }
+            });
+        } finally {
+            setIsTyping(false);
+        }
+    };
+
+    const downloadPDF = () => {
+        if (!content) return;
+
+        const doc = new jsPDF();
+        let yPos = 20;
+
+        // Title
+        doc.setFontSize(22);
+        doc.setTextColor(67, 97, 238);
+        doc.text(`Study Notes: ${activeSubject?.name}`, 20, yPos);
+        yPos += 15;
+
+        // Body text helper
+        const addSection = (title, text) => {
+            if (yPos > 250) { doc.addPage(); yPos = 20; }
+            doc.setFontSize(16);
+            doc.setTextColor(0, 0, 0);
+            doc.setFont("helvetica", "bold");
+            doc.text(title, 20, yPos);
+            yPos += 10;
+
+            doc.setFontSize(11);
+            doc.setFont("helvetica", "normal");
+            const splitText = doc.splitTextToSize(text.replace(/[#*]/g, ''), 170);
+            doc.text(splitText, 20, yPos);
+            yPos += (splitText.length * 6) + 10;
+        };
+
+        if (content.notes) {
+            addSection("Key Concepts", content.notes);
+        }
+
+        if (content.mcqs && content.mcqs.length > 0) {
+            let mcqText = content.mcqs.map((q, i) =>
+                `${i + 1}. ${q.question}\nOptions: ${q.options.join(', ')}\nCorrect Answer: ${q.correctKey}\nExplanation: ${q.explanation}\n`
+            ).join('\n');
+            addSection("Multiple Choice Questions", mcqText);
+        }
+
+        doc.save(`${activeSubject?.name}_Study_Notes.pdf`);
     };
 
     if (!isSetupComplete) {
@@ -85,7 +243,7 @@ export default function StudyPage() {
             <div className="page-content">
                 <div className="empty-state" style={{ paddingTop: 80 }}>
                     <h3>Setup not complete</h3>
-                    <p>Name all 3 subjects before using Study Mode.</p>
+                    <p>Name at least one subject before using Subject Dashboard.</p>
                     <button className="btn btn-primary" onClick={() => setCurrentPage('setup')}>Go to Setup</button>
                 </div>
             </div>
@@ -96,15 +254,15 @@ export default function StudyPage() {
         <div className="page-content">
             <div className="study-header">
                 <div>
-                    <div className="study-title">Study Mode</div>
-                    <div className="study-subtitle">Practice questions based on your uploaded notes</div>
+                    <div className="study-title">{activeSubject?.name || 'Subject Dashboard'}</div>
+                    <div className="study-subtitle">Auto-generated notes, quizzes, and grounded Q&A</div>
                 </div>
                 <div style={{ display: 'flex', gap: 6 }}>
-                    {subjects.map(s => (
+                    {subjects.filter(s => s.name).map(s => (
                         <button
                             key={s.id}
                             className={`subject-tab ${activeSubjectId === s.id ? 'active' : ''}`}
-                            onClick={() => { setActiveSubjectId(s.id); setContent(null); }}
+                            onClick={() => setActiveSubjectId(s.id)}
                         >
                             {s.name}
                         </button>
@@ -112,67 +270,122 @@ export default function StudyPage() {
                 </div>
             </div>
 
-            <div className="card" style={{ marginBottom: 18 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
-                    <div style={{ flex: 1 }}>
-                        <div style={{ fontWeight: 600, fontSize: '0.9rem', marginBottom: 3 }}>{activeSubject?.name}</div>
-                        <div style={{ fontSize: '0.76rem', color: 'var(--text-secondary)' }}>
-                            {activeSubject?.files.length > 0
-                                ? `${activeSubject.files.length} note file${activeSubject.files.length !== 1 ? 's' : ''} loaded`
-                                : 'No files uploaded — questions will be generic'}
+            {loading && !content && (
+                <div className="empty-state" style={{ paddingTop: 64 }}>
+                    <div className="ai-loader">
+                        <div className="logo-mark" style={{ width: 48, height: 48, marginBottom: 20 }}>
+                            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                                <path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z" />
+                                <path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z" />
+                            </svg>
                         </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 16 }}>
-                        <div style={{ textAlign: 'center' }}>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--accent-blue)' }}>5</div>
-                            <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>MCQs</div>
-                        </div>
-                        <div style={{ width: 1, background: 'var(--border)' }} />
-                        <div style={{ textAlign: 'center' }}>
-                            <div style={{ fontSize: '1.2rem', fontWeight: 700, color: 'var(--accent-green)' }}>3</div>
-                            <div style={{ fontSize: '0.67rem', color: 'var(--text-muted)' }}>Short Ans</div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            {!content && !loading && (
-                <div className="empty-state" style={{ paddingTop: 32 }}>
-                    <h3>Generate practice questions</h3>
-                    <p>5 MCQs and 3 short-answer questions based on your {activeSubject?.name} notes.</p>
-                    <button className="btn btn-primary btn-lg" onClick={generateContent} style={{ marginTop: 6 }}>
-                        Generate Questions
-                    </button>
-                </div>
-            )}
-
-            {loading && (
-                <div className="empty-state" style={{ paddingTop: 32 }}>
-                    <h3>Generating...</h3>
-                    <p>Analyzing {activeSubject?.name} notes</p>
-                    <div style={{ display: 'flex', gap: 5 }}>
+                    <h3>Generating Subject Dashboard...</h3>
+                    <p>Analyzing your files to create short notes and practice questions.</p>
+                    <div style={{ display: 'flex', gap: 5, marginTop: 12 }}>
                         {[0, 1, 2].map(i => <div key={i} className="typing-dot" style={{ width: 8, height: 8, animationDelay: `${i * 0.2}s` }} />)}
                     </div>
                 </div>
             )}
 
-            {content && !loading && (
-                <div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
-                        <div style={{ fontSize: '0.76rem', color: 'var(--text-muted)' }}>
-                            Generated for <strong style={{ color: 'var(--text-primary)' }}>{activeSubject?.name}</strong>
+            {error && <div className="error-alert">{error}</div>}
+
+            {activeSubject?.files.length === 0 && (
+                <div className="empty-state">
+                    <h3>No files uploaded for {activeSubject?.name}</h3>
+                    <p>Upload your notes in the Setup tab to unlock the dashboard features.</p>
+                    <button className="btn btn-secondary" onClick={() => setCurrentPage('setup')}>Go to Setup</button>
+                </div>
+            )}
+
+            {content && (
+                <div className="study-container animate-fade-in">
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 12, gap: 8 }}>
+                        <button className="btn btn-secondary btn-sm" onClick={handleGenerate} disabled={loading}>
+                            {loading ? 'Regenerating...' : 'Regenerate All'}
+                        </button>
+                        <button className="btn btn-primary btn-sm" onClick={downloadPDF}>
+                            📥 Download as PDF
+                        </button>
+                    </div>
+
+                    {/* --- Section 1: Auto-generated Short Notes --- */}
+                    <div className="study-section">
+                        <div className="questions-section-title">
+                            <span style={{ marginRight: 8 }}>📝</span> Subject Summary & Key Notes
                         </div>
-                        <button className="btn btn-secondary btn-sm" onClick={generateContent}>Regenerate</button>
+                        <div className="notes-content card glass" style={{ borderLeft: '4px solid var(--accent-blue)' }}>
+                            <div dangerouslySetInnerHTML={{ __html: marked.parse(content.notes || '_The AI could not generate a summary for this specific material. Try uploading more detailed notes._') }} />
+                        </div>
                     </div>
 
-                    <div className="questions-section">
-                        <div className="questions-section-title">Multiple Choice</div>
-                        {content.mcqs.map((q, i) => <MCQCard key={i} q={q} index={i} />)}
+                    {/* --- Section 2: MCQs --- */}
+                    <div className="study-section" style={{ marginTop: 32 }}>
+                        <div className="questions-section-title">
+                            <span style={{ marginRight: 8 }}>🎯</span> Practice Quiz (MCQs)
+                        </div>
+                        {(content.mcqs || []).map((q, i) => <MCQCard key={i} q={q} index={i} />)}
                     </div>
 
-                    <div className="questions-section">
-                        <div className="questions-section-title">Short Answer</div>
-                        {content.shortAnswer.map((q, i) => <ShortAnsCard key={i} q={q} index={i} />)}
+                    {/* --- Section 3: Short Answer --- */}
+                    <div className="study-section" style={{ marginTop: 32 }}>
+                        <div className="questions-section-title">
+                            <span style={{ marginRight: 8 }}>💡</span> Key Flashcards
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+                            {(content.shortAnswer || []).map((q, i) => <ShortAnsCard key={i} q={q} index={i} />)}
+                        </div>
+                    </div>
+
+                    {/* --- Section 4: Chat --- */}
+                    <div className="study-section chat-integration" style={{ marginTop: 48, borderTop: '2px solid var(--border)', paddingTop: 32 }}>
+                        <div className="questions-section-title">
+                            <span style={{ marginRight: 8 }}>💬</span> Ask My Notes — AI Q&A
+                        </div>
+                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
+                            Got a specific question? Ask the AI, and it will answer strictly based on your uploaded notes.
+                        </p>
+
+                        <div className="integrated-chat-history card glass" style={{ height: '450px', display: 'flex', flexDirection: 'column' }}>
+                            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 5px' }}>
+                                {activeSubject?.chatHistory.length === 0 && !isTyping && (
+                                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center' }}>
+                                        <div style={{ fontSize: '2rem', marginBottom: 12 }}>🖋️</div>
+                                        <p style={{ fontSize: '0.85rem', maxWidth: '240px' }}>Ask anything like "Explain the second chapter" or "What are the key dates?"</p>
+                                    </div>
+                                )}
+                                {activeSubject?.chatHistory.map((msg, i) => (
+                                    <div key={i} className={`message ${msg.role === 'user' ? 'user' : 'ai'}`} style={{ marginBottom: 16 }}>
+                                        <div className={`avatar ${msg.role}`}>{msg.role === 'user' ? 'U' : 'AI'}</div>
+                                        {msg.role === 'user' ? (
+                                            <div className="message-content">
+                                                <div className="message-bubble">{msg.text}</div>
+                                                <div className="message-time">{msg.time}</div>
+                                            </div>
+                                        ) : (
+                                            <AnswerMessage msg={msg} />
+                                        )}
+                                    </div>
+                                ))}
+                                {isTyping && <TypingIndicator />}
+                                <div ref={messagesEndRef} />
+                            </div>
+
+                            <div className="chat-input-area" style={{ border: 'none', padding: '12px 0 0 0' }}>
+                                <div className="chat-input-row">
+                                    <textarea
+                                        ref={textareaRef}
+                                        rows={1}
+                                        placeholder={`Ask about ${activeSubject?.name}...`}
+                                        value={inputText}
+                                        onChange={e => setInputText(e.target.value)}
+                                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
+                                        disabled={isTyping}
+                                    />
+                                    <button className="send-btn" onClick={handleChatSend} disabled={!inputText.trim() || isTyping}>↑</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             )}

@@ -2,43 +2,54 @@ import { AppProvider } from './context/AppContext';
 import { useApp } from './context/AppContext';
 import Sidebar from './components/Sidebar';
 import SetupPage from './pages/SetupPage';
-import ChatPage from './pages/ChatPage';
 import StudyPage from './pages/StudyPage';
-import './index.css';
+import ChatPage from './pages/ChatPage';
 
 function AppContent() {
-  const { currentPage, subjects, activeSubjectId } = useApp();
-  const activeSubject = subjects.find(s => s.id === activeSubjectId);
+  const { currentPage, activeSubject } = useApp();
 
-  const pageTitle = {
-    setup: { title: 'Subject Setup', subtitle: 'Create your 3 subjects and upload notes' },
-    chat: { title: 'Ask My Notes', subtitle: `Querying: ${activeSubject?.name || '—'} · Answers grounded in your notes only` },
-    study: { title: 'Study Mode', subtitle: 'Practice MCQs and short-answer questions' },
-  }[currentPage];
+  // Derive topbar title & subtitle based on current page
+  const pageConfig = {
+    setup: {
+      title: 'Subject Setup',
+      subtitle: 'Name your subjects and upload notes',
+    },
+    study: {
+      title: activeSubject?.name || 'Subject Dashboard',
+      subtitle: 'Review notes, quizzes, and ask questions',
+    },
+    chat: {
+      title: activeSubject?.name ? `Chat — ${activeSubject.name}` : 'Chat with PDF',
+      subtitle: 'Ask questions grounded strictly in your uploaded notes',
+    },
+  };
+
+  const { title: pageTitle, subtitle: pageSubtitle } = pageConfig[currentPage] || pageConfig.setup;
 
   return (
     <div className="app-layout">
       <Sidebar />
       <div className="main-area">
-        <div className="topbar">
+        <header className="topbar">
           <div>
-            <div className="topbar-title">{pageTitle.title}</div>
-            <div className="topbar-subtitle">{pageTitle.subtitle}</div>
+            <div className="topbar-title">{pageTitle}</div>
+            <div className="topbar-subtitle">{pageSubtitle}</div>
           </div>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-            <div style={{
-              fontSize: '0.72rem', color: 'var(--text-muted)',
-              background: 'var(--bg-card)', border: '1px solid var(--border)',
-              borderRadius: 6, padding: '4px 10px'
-            }}>
-              AskMyNotes v1.0
-            </div>
+          <div className="topbar-actions">
+            {(currentPage === 'study' || currentPage === 'chat') && (
+              <button
+                className="btn btn-secondary btn-sm"
+                onClick={() => window.location.reload()}
+              >
+                Reset Session
+              </button>
+            )}
           </div>
-        </div>
+        </header>
 
         {currentPage === 'setup' && <SetupPage />}
-        {currentPage === 'chat' && <ChatPage />}
         {currentPage === 'study' && <StudyPage />}
+        {currentPage === 'chat' && <ChatPage />}
       </div>
     </div>
   );
