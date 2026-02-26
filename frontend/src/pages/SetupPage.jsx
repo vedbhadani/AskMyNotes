@@ -10,7 +10,7 @@ function formatFileSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
 }
 
-function SubjectCard({ subject, index, canRemove, onStartAsking, isProcessing }) {
+function SubjectCard({ subject, index, canRemove, onSave, isProcessing, isSaved }) {
     const { updateSubject, addFiles, removeFile, removeSubject } = useApp();
     const fileInputRef = useRef(null);
     const [dragOver, setDragOver] = useState(false);
@@ -83,13 +83,17 @@ function SubjectCard({ subject, index, canRemove, onStartAsking, isProcessing })
 
             <button
                 className="btn btn-primary"
-                onClick={() => onStartAsking(subject.id)}
+                onClick={() => onSave(subject.id)}
                 disabled={!canStart || isProcessing}
-                style={{ width: '100%', marginTop: 'auto', gap: 8, height: 44 }}
+                style={{ width: '100%', marginTop: 'auto', gap: 8, height: 44, background: isSaved ? 'var(--accent-neon)' : undefined, color: isSaved ? '#000' : undefined }}
             >
-                {isProcessing ? 'PROCESSING...' : (
+                {isProcessing ? 'SAVING...' : isSaved ? (
                     <>
-                        START ASKING <ChevronRight size={16} />
+                        <CheckCircle2 size={16} /> SAVED!
+                    </>
+                ) : (
+                    <>
+                        SAVE <UploadCloud size={16} />
                     </>
                 )}
             </button>
@@ -98,32 +102,64 @@ function SubjectCard({ subject, index, canRemove, onStartAsking, isProcessing })
 }
 
 export default function SetupPage() {
-    const { subjects, setActiveSubjectId, setCurrentPage, markUploaded, addSubject } = useApp();
+    const { subjects, loading, setActiveSubjectId, setCurrentPage, markUploaded, addSubject, refreshSubjects } = useApp();
     const [uploadingId, setUploadingId] = useState(null);
+    const [savedIds, setSavedIds] = useState(new Set());
     const [uploadError, setUploadError] = useState('');
+
+    if (loading) {
+        return (
+            <div className="page-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '60vh' }}>
+                <div className="ai-loader">
+                    <img src={mascotImg} alt="Mascot" style={{ width: 100, height: 100, borderRadius: '50%', border: '2px solid var(--accent-neon)', objectFit: 'cover' }} />
+                    <p style={{ marginTop: 16, color: 'var(--accent-neon)', fontFamily: 'JetBrains Mono, monospace' }}>SYNCING DATA...</p>
+                </div>
+            </div>
+        );
+    }
 
     const totalFiles = subjects.reduce((acc, s) => acc + s.files.length, 0);
     const namedCount = subjects.filter(s => s.name.trim()).length;
     const canAddMore = subjects.length < 3;
 
-    const handleStartAsking = async (subjectId) => {
+    const handleSave = async (subjectId) => {
         const subject = subjects.find(s => s.id === subjectId);
         if (!subject || !subject.name.trim() || subject.files.length === 0) return;
 
         setUploadingId(subjectId);
         setUploadError('');
-        setActiveSubjectId(subjectId);
 
         try {
-            if (!subject.uploaded) {
-                await clearSubjectFiles(subject.id);
-                await uploadSubjectFiles(subject.id, subject.name, subject.files);
-                markUploaded(subject.id);
+            // Filter to only upload actual new File objects (not metadata objects from refresh)
+            const newFiles = subject.files.filter(f => f instanceof File || f instanceof Blob);
+
+            if (newFiles.length > 0) {
+                await uploadSubjectFiles(subject.id, subject.name, newFiles);
+            } else {
+                // If no new files, at least update the subject name in the backend
+                // This can be done by calling upload with an empty files array (the route handles it)
+                await uploadSubjectFiles(subject.id, subject.name, []);
             }
-            setCurrentPage('study');
+
+            // Re-fetch everything from server to ensure perfect sync
+            await refreshSubjects();
+
+            // Show confirmation
+            setSavedIds(prev => new Set([...prev, subjectId]));
+            setActiveSubjectId(subjectId);
+
+            // Auto hide confirmation after 3 seconds
+            setTimeout(() => {
+                setSavedIds(prev => {
+                    const next = new Set(prev);
+                    next.delete(subjectId);
+                    return next;
+                });
+            }, 3000);
+
         } catch (err) {
-            console.error('Upload error:', err);
-            setUploadError(err.message || 'Failed to upload files. Make sure the backend server is running.');
+            console.error('Save error:', err);
+            setUploadError(err.message || 'Failed to save. Make sure the backend server is running.');
         } finally {
             setUploadingId(null);
         }
@@ -176,8 +212,9 @@ export default function SetupPage() {
                         subject={s}
                         index={i}
                         canRemove={subjects.length > 1}
-                        onStartAsking={handleStartAsking}
+                        onSave={handleSave}
                         isProcessing={uploadingId === s.id}
+                        isSaved={savedIds.has(s.id)}
                     />
                 ))}
 

@@ -1,13 +1,13 @@
 import { useState, useEffect, useRef } from 'react';
 import mascotImg from '../assets/Screenshot 2026-02-26 at 18.28.04.png';
 import { useApp } from '../context/AppContext';
-import { generateStudyContent, askQuestion } from '../utils/mockApi';
+import { generateStudyContent, askQuestion, fetchFileContent } from '../utils/mockApi';
 import { marked } from 'marked';
 import { jsPDF } from 'jspdf';
 import {
     BookOpen, FileText, Zap, Sparkles, MessageSquare,
     RefreshCw, FileDown, Send, Bot, User,
-    CheckCircle2, AlertCircle, Quote, Eye, EyeOff, SearchX, ShieldCheck
+    CheckCircle2, AlertCircle, Quote, Eye, EyeOff, SearchX, ShieldCheck, X
 } from 'lucide-react';
 
 // --- MCQ Components ---
@@ -76,74 +76,13 @@ function ShortAnsCard({ q, index }) {
     );
 }
 
-// --- Chat Components ---
-function TypingIndicator() {
-    return (
-        <div className="message ai">
-            <div className="avatar ai"><Bot size={16} /></div>
-            <div className="typing-indicator">
-                <div className="typing-dot" />
-                <div className="typing-dot" />
-                <div className="typing-dot" />
-            </div>
-        </div>
-    );
-}
-
-function AnswerMessage({ msg }) {
-    const data = msg.data;
-    if (data?.notFound) {
-        return (
-            <div className="message-content">
-                <div className="message-bubble">
-                    <div className="not-found-block" style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
-                        <SearchX size={20} color="var(--accent-red)" style={{ marginTop: 2 }} />
-                        <div>
-                            <div style={{ fontWeight: 600, fontFamily: 'JetBrains Mono, monospace', fontSize: '0.8rem' }}>NOT FOUND IN YOUR NOTES</div>
-                            <div style={{ fontSize: '0.79rem', marginTop: 4, opacity: 0.85 }}>
-                                The uploaded notes don't contain sufficient information to answer this question.
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        );
-    }
-
-    return (
-        <div className="message-content">
-            <div className="message-bubble">
-                <div dangerouslySetInnerHTML={{ __html: marked.parse(data?.answer || '') }} />
-                <div className="answer-meta">
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-                        <span className={`confidence-badge ${data?.confidence?.toLowerCase()}`} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                            <ShieldCheck size={12} /> {data?.confidence}
-                        </span>
-                    </div>
-                    {data?.evidence?.length > 0 && (
-                        <div className="evidence-block">
-                            <div className="evidence-label" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Quote size={10} /> SUPPORTING EVIDENCE
-                            </div>
-                            {data.evidence.map((e, i) => (
-                                <div key={i} className="evidence-snippet">"{e}"</div>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </div>
-            <div className="message-time">{msg.time}</div>
-        </div>
-    );
-}
 
 export default function StudyPage() {
-    const { subjects, activeSubjectId, setActiveSubjectId, activeSubject, setCurrentPage, isSetupComplete, addMessage } = useApp();
+    const { subjects, activeSubjectId, setActiveSubjectId, activeSubject, setCurrentPage, isSetupComplete, addMessage, updateSubject } = useApp();
 
-    // Per-file content cache: { [fileName]: content }
-    // "combined" key is used for all files together
-    const [contentCache, setContentCache] = useState({});
-    const [selectedFileName, setSelectedFileName] = useState('combined');
+    const [selectedFileName, setSelectedFileName] = useState(activeSubject?.files[0]?.name || 'default');
+    const quizRef = useRef(null);
+    const contentCache = activeSubject?.contentCache || {};
 
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState('');
@@ -151,80 +90,82 @@ export default function StudyPage() {
     const content = contentCache[selectedFileName] || null;
 
 
-    // Chat state
-    const [inputText, setInputText] = useState('');
-    const [isTyping, setIsTyping] = useState(false);
-    const messagesEndRef = useRef(null);
-    const textareaRef = useRef(null);
 
-    // Auto-generate content when subject or selected file changes
-    useEffect(() => {
-        setError('');
-        if (activeSubject && activeSubject.name && activeSubject.files.length > 0) {
-            // If we don't have content for the current selection, generate it
-            if (!contentCache[selectedFileName]) {
-                handleGenerate(selectedFileName);
-            }
-        }
-    }, [activeSubjectId, selectedFileName]);
+    // Removed auto-generate useEffect. Manual trigger only.
+    const [previewContent, setPreviewContent] = useState(null);
+    const [previewingFile, setPreviewingFile] = useState(null);
 
     // Reset selection when subject changes
     useEffect(() => {
-        setSelectedFileName('combined');
-        setContentCache({});
+        if (activeSubject?.files?.length > 0) {
+            setSelectedFileName(activeSubject.files[0].name);
+        }
     }, [activeSubjectId]);
 
-    useEffect(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }, [activeSubject?.chatHistory, isTyping]);
 
-    const handleGenerate = async (fileName = selectedFileName) => {
+    const [generatingMode, setGeneratingMode] = useState(null);
+
+    const handleGenerate = async (fileName = selectedFileName, mode = 'summarize') => {
+        // Switch view immediately to show correct loading text
+        setSelectedFileName(fileName);
         setLoading(true);
+        setGeneratingMode(mode);
         setError('');
+
         const fn = fileName === 'combined' ? undefined : fileName;
         try {
-            const result = await generateStudyContent(activeSubjectId, activeSubject?.name, fn);
-            setContentCache(prev => ({
-                ...prev,
-                [fileName]: result
-            }));
+            const result = await generateStudyContent(activeSubjectId, activeSubject?.name, fn, mode);
+
+            // Merge with existing cache for this file
+            const currentCache = activeSubject?.contentCache || {};
+            const existingFileContent = currentCache[fileName] || {};
+
+            const merged = {
+                // If mode is 'summarize', we definitely want the new notes. 
+                // If mode is 'practice', we want to keep existing notes if the new ones are empty.
+                notes: (mode === 'summarize' ? result.notes : (result.notes || existingFileContent.notes)) || "",
+
+                // If mode is 'practice', we definitely want the new MCQs/ShortAns.
+                // If mode is 'summarize', we keep existing ones only if the new ones are empty/null.
+                mcqs: (mode === 'practice' ? result.mcqs : (result.mcqs?.length ? result.mcqs : existingFileContent.mcqs)) || [],
+                shortAnswer: (mode === 'practice' ? result.shortAnswer : (result.shortAnswer?.length ? result.shortAnswer : existingFileContent.shortAnswer)) || []
+            };
+
+            updateSubject(activeSubjectId, {
+                contentCache: {
+                    ...currentCache,
+                    [fileName]: merged
+                }
+            });
+
+            // Scroll to quiz if in practice mode
+            if (mode === 'practice') {
+                setTimeout(() => {
+                    quizRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }, 100);
+            }
         } catch (err) {
             console.error('Study mode error:', err);
             setError(err.message || 'Failed to generate study content.');
         } finally {
             setLoading(false);
+            setGeneratingMode(null);
         }
     };
 
-    const handleChatSend = async () => {
-        const text = inputText.trim();
-        if (!text || isTyping) return;
-
-        const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-        addMessage(activeSubjectId, { role: 'user', text, time });
-        setInputText('');
-        setIsTyping(true);
-
+    const handlePreview = async (fileName) => {
+        setLoading(true);
         try {
-            const response = await askQuestion(activeSubjectId, text, activeSubject?.name);
-            addMessage(activeSubjectId, {
-                role: 'ai',
-                text: response.answer || '',
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                data: response,
-            });
+            const data = await fetchFileContent(activeSubjectId, fileName);
+            setPreviewContent(data.text);
+            setPreviewingFile(fileName);
         } catch (err) {
-            console.error('Chat error:', err);
-            addMessage(activeSubjectId, {
-                role: 'ai',
-                text: `⚠️ Error: ${err.message}`,
-                time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                data: { answer: `Error: ${err.message}`, confidence: 'Low' }
-            });
+            setError('Failed to load preview.');
         } finally {
-            setIsTyping(false);
+            setLoading(false);
         }
     };
+
 
     const downloadPDF = () => {
         if (!content) return;
@@ -306,143 +247,224 @@ export default function StudyPage() {
                     <div className="ai-loader" style={{ marginBottom: 32 }}>
                         <img src={mascotImg} alt="Mascot" style={{ width: 180, height: 180, borderRadius: '50%', border: '2px solid var(--accent-neon)', boxShadow: 'var(--glow)', objectFit: 'cover' }} />
                     </div>
-                    <h3 style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent-neon)', textTransform: 'uppercase' }}>ANALYZING MATERIAL...</h3>
-                    <p style={{ color: 'var(--text-secondary)' }}>Generating subject dashboard and practice questions.</p>
+                    <h3 style={{ fontFamily: 'JetBrains Mono, monospace', color: 'var(--accent-neon)', textTransform: 'uppercase' }}>
+                        {generatingMode === 'practice' ? 'GENERATING PRACTICE SET...' : 'SUMMARIZING MATERIAL...'}
+                    </h3>
+                    <p style={{ color: 'var(--text-secondary)' }}>
+                        {generatingMode === 'practice' ? 'Creating custom MCQs and flashcards for your notes.' : 'Extracting key concepts and building your dashboard.'}
+                    </p>
                 </div>
             )}
 
             {error && <div className="error-alert">{error}</div>}
 
-            {activeSubject?.files.length === 0 && (
-                <div className="empty-state">
-                    <h3>No files uploaded for {activeSubject?.name}</h3>
-                    <p>Upload your notes in the Setup tab to unlock the dashboard features.</p>
-                    <button className="btn btn-secondary" onClick={() => setCurrentPage('setup')}>Go to Setup</button>
+            {/* Subject Files Cards */}
+            {!content && activeSubject?.files.length > 0 && (
+                <div className="study-container animate-fade-in" style={{ paddingBottom: 40 }}>
+                    <div style={{ marginBottom: 32 }}>
+                        <h2 style={{ fontSize: '1.25rem', marginBottom: 8 }}>{activeSubject.name} Materials</h2>
+                        <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>Review your notes or start the AI analysis below.</p>
+                    </div>
+
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 16, marginBottom: 40 }}>
+                        {activeSubject.files.map((file, idx) => (
+                            <div key={idx} className="card glass animate-fade-in" style={{ animationDelay: `${idx * 0.1}s`, padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                                    <div style={{ width: 40, height: 40, borderRadius: 8, background: 'rgba(57, 255, 20, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                        <FileText size={20} color="var(--accent-neon)" />
+                                    </div>
+                                    <div style={{ overflow: 'hidden' }}>
+                                        <div style={{ fontWeight: 600, fontSize: '0.95rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{file.name}</div>
+                                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>PDF Document</div>
+                                    </div>
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 8, marginTop: 8 }}>
+                                    <button className="btn btn-secondary btn-sm" style={{ fontSize: '0.7rem', width: '100%' }} onClick={() => handlePreview(file.name)}>
+                                        PREVIEW FILE
+                                    </button>
+                                    <div style={{ display: 'flex', gap: 8 }}>
+                                        <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: '0.65rem', padding: '6px 4px' }} onClick={() => handleGenerate(file.name, 'summarize')}>
+                                            SUMMARIZE
+                                        </button>
+                                        <button className="btn btn-primary btn-sm" style={{ flex: 1, fontSize: '0.65rem', padding: '6px 4px', background: 'rgba(57, 255, 20, 0.1)', color: 'var(--accent-neon)' }} onClick={() => handleGenerate(file.name, 'practice')}>
+                                            PRACTICE
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+
+                </div>
+            )}
+
+            {/* Preview Modal - Premium Document Viewer */}
+            {previewingFile && (
+                <div className="modal-overlay animate-fade-in" style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.9)', backdropFilter: 'blur(12px)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px 0' }}>
+                    <div className="animate-slide-up" style={{ maxWidth: 900, width: '95%', height: '90vh', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+
+                        {/* Modal Header */}
+                        <div style={{ padding: '24px 32px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', borderBottom: '1px solid rgba(255,255,255,0.08)', borderRadius: '24px 24px 0 0' }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+                                <div style={{ width: 44, height: 44, borderRadius: 12, border: '1px solid var(--accent-neon)', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(57, 255, 20, 0.05)' }}>
+                                    <FileText size={22} color="var(--accent-neon)" />
+                                </div>
+                                <div>
+                                    <h3 style={{ fontSize: '1.1rem', fontWeight: 600, color: '#fff', marginBottom: 2 }}>{previewingFile}</h3>
+                                    <div style={{ fontSize: '0.75rem', color: 'var(--accent-neon)', fontFamily: 'JetBrains Mono, monospace', opacity: 0.8 }}>SOURCE DOCUMENT PREVIEW</div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => { setPreviewingFile(null); setPreviewContent(null); }}
+                                className="close-preview-btn"
+                                style={{ background: 'rgba(255,255,255,0.05)', border: 'none', color: '#fff', cursor: 'pointer', width: 40, height: 40, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', transition: 'all 0.2s' }}
+                            >
+                                <X size={22} />
+                            </button>
+                        </div>
+
+                        {/* Document Body */}
+                        <div className="custom-scrollbar" style={{ flex: 1, overflowY: 'auto', background: 'rgba(10,10,10,0.4)', padding: '40px 20px', display: 'flex', justifyContent: 'center' }}>
+                            <div style={{
+                                maxWidth: '750px',
+                                width: '100%',
+                                background: 'rgba(255,255,255,0.02)',
+                                border: '1px solid rgba(255,255,255,0.05)',
+                                padding: '60px 50px',
+                                borderRadius: 4,
+                                minHeight: '100%',
+                                boxShadow: '0 20px 50px rgba(0,0,0,0.5)',
+                                fontFamily: '"Inter", sans-serif',
+                                color: '#e0e0e0',
+                                lineHeight: '1.8',
+                                fontSize: '1.05rem',
+                                whiteSpace: 'pre-wrap',
+                                letterSpacing: '0.01em'
+                            }}>
+                                {previewContent || (
+                                    <div style={{ height: 'min-content', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', opacity: 0.3, marginTop: 100 }}>
+                                        <RefreshCw size={48} className="animate-spin" style={{ marginBottom: 20 }} />
+                                        <p style={{ fontFamily: 'JetBrains Mono, monospace' }}>EXTRACTING TEXT...</p>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+
+                        {/* Modal Footer */}
+                        <div style={{ padding: '16px 32px', background: 'rgba(0,0,0,0.4)', borderTop: '1px solid rgba(255,255,255,0.08)', borderRadius: '0 0 24px 24px', textAlign: 'right', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', fontFamily: 'JetBrains Mono, monospace' }}>
+                                END OF DOCUMENT
+                            </div>
+                            <button className="btn btn-secondary btn-sm" onClick={() => { setPreviewingFile(null); setPreviewContent(null); }} style={{ padding: '8px 24px' }}>
+                                EXIT READER
+                            </button>
+                        </div>
+                    </div>
                 </div>
             )}
 
             {content && (
-                <div className="study-container animate-fade-in">
-                    {activeSubject?.files.length > 1 && (
-                        <div style={{ marginBottom: 24 }}>
-                            <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8, fontFamily: 'JetBrains Mono, monospace' }}>
-                                Generate for:
-                            </div>
-                            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                                <button
-                                    className={`subject-tab ${selectedFileName === 'combined' ? 'active' : ''}`}
-                                    onClick={() => setSelectedFileName('combined')}
-                                    style={{ fontSize: '0.75rem', padding: '6px 12px' }}
-                                >
-                                    All Files Combined
-                                </button>
-                                {activeSubject.files.map((file, idx) => (
-                                    <button
-                                        key={idx}
-                                        className={`subject-tab ${selectedFileName === file.name ? 'active' : ''}`}
-                                        onClick={() => setSelectedFileName(file.name)}
-                                        style={{ fontSize: '0.75rem', padding: '6px 12px' }}
-                                    >
-                                        <FileText size={12} style={{ marginRight: 4, opacity: 0.7 }} />
-                                        {file.name}
+                <>
+                    <div className="study-container animate-fade-in">
+                        <div className="card glass control-bar" style={{ padding: '20px 24px', marginBottom: 32, borderRadius: 16, border: '1px solid rgba(255,255,255,0.08)' }}>
+                            {activeSubject?.files.length > 1 && (
+                                <>
+                                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 16 }}>
+                                        <div style={{ fontSize: '0.65rem', color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.05em', fontFamily: 'JetBrains Mono, monospace', display: 'flex', alignItems: 'center', gap: 6 }}>
+                                            <FileText size={12} /> Generate For:
+                                        </div>
+                                        <div style={{ fontSize: '0.65rem', color: 'var(--accent-neon)', fontFamily: 'JetBrains Mono, monospace', opacity: 0.7 }}>
+                                            {selectedFileName.toUpperCase()}
+                                        </div>
+                                    </div>
+                                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
+                                        {activeSubject.files.map((file, idx) => (
+                                            <button
+                                                key={idx}
+                                                className={`subject-tab ${selectedFileName === file.name ? 'active' : ''}`}
+                                                onClick={() => setSelectedFileName(file.name)}
+                                                style={{ fontSize: '0.75rem', padding: '6px 14px', borderRadius: 8 }}
+                                            >
+                                                {file.name}
+                                            </button>
+                                        ))}
+                                    </div>
+                                    <div style={{ height: 1, background: 'rgba(255,255,255,0.05)', marginBottom: 20 }}></div>
+                                </>
+                            )}
+
+                            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between' }}>
+                                <div style={{ display: 'flex', gap: 10 }}>
+                                    <button className="btn btn-secondary btn-sm" onClick={() => handleGenerate(selectedFileName, 'summarize')} disabled={loading} style={{ padding: '8px 16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                        <RefreshCw size={14} style={{ marginRight: 8 }} className={loading && generatingMode === 'summarize' ? "animate-spin" : ""} />
+                                        RE-SUMMARIZE
                                     </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
-
-                    <div style={{ display: 'flex', gap: 8 }}>
-                        <button className="btn btn-secondary btn-sm" onClick={() => handleGenerate(selectedFileName)} disabled={loading}>
-                            {loading ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
-                            {loading ? 'REGENERATING...' : selectedFileName === 'combined' ? 'REGENERATE ALL' : `REGENERATE FOR ${selectedFileName.toUpperCase()}`}
-                        </button>
-                        <button className="btn btn-primary btn-sm" onClick={downloadPDF}>
-                            <FileDown size={14} /> DOWNLOAD PDF
-                        </button>
-                    </div>
-
-                    {/* --- Section 1: Auto-generated Short Notes --- */}
-                    <div className="study-section">
-                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <FileText size={18} color="var(--accent-neon)" /> Subject Summary & Key Notes
-                        </div>
-                        <div className="notes-content card glass" style={{ borderLeft: '4px solid var(--accent-neon)' }}>
-                            <div dangerouslySetInnerHTML={{ __html: marked.parse(content.notes || '_The AI could not generate a summary for this specific material. Try uploading more detailed notes._') }} />
-                        </div>
-                    </div>
-
-                    {/* --- Section 2: MCQs --- */}
-                    <div className="study-section" style={{ marginTop: 32 }}>
-                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <Zap size={18} color="var(--accent-neon)" /> Practice Quiz (MCQs)
-                        </div>
-                        {(content.mcqs || []).map((q, i) => <MCQCard key={i} q={q} index={i} />)}
-                    </div>
-
-                    {/* --- Section 3: Short Answer --- */}
-                    <div className="study-section" style={{ marginTop: 32 }}>
-                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <Sparkles size={18} color="var(--accent-neon)" /> Key Flashcards
-                        </div>
-                        <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
-                            {(content.shortAnswer || []).map((q, i) => <ShortAnsCard key={i} q={q} index={i} />)}
-                        </div>
-                    </div>
-
-                    {/* --- Section 4: Chat --- */}
-                    <div className="study-section chat-integration" style={{ marginTop: 48, borderTop: '2px solid var(--border)', paddingTop: 32 }}>
-                        <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                            <MessageSquare size={18} color="var(--accent-neon)" /> Ask My Notes — AI Q&A
-                        </div>
-                        <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', marginBottom: 20 }}>
-                            Got a specific question? Ask the AI, and it will answer strictly based on your uploaded notes.
-                        </p>
-
-                        <div className="integrated-chat-history card glass" style={{ height: '450px', display: 'flex', flexDirection: 'column' }}>
-                            <div style={{ flex: 1, overflowY: 'auto', padding: '10px 5px' }}>
-                                {activeSubject?.chatHistory.length === 0 && !isTyping && (
-                                    <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', textAlign: 'center', padding: 20 }}>
-                                        <img src={mascotImg} alt="Mascot" style={{ width: 80, height: 80, borderRadius: '50%', marginBottom: 16, border: '1px solid var(--border)', opacity: 0.8 }} />
-                                        <p style={{ fontSize: '0.85rem', maxWidth: '240px' }}>Ask anything like "Explain the second chapter" or "What are the key topics?"</p>
-                                    </div>
-                                )}
-                                {activeSubject?.chatHistory.map((msg, i) => (
-                                    <div key={i} className={`message ${msg.role === 'user' ? 'user' : 'ai'}`} style={{ marginBottom: 16 }}>
-                                        <div className={`avatar ${msg.role}`}>{msg.role === 'user' ? <User size={16} /> : <Bot size={16} />}</div>
-                                        {msg.role === 'user' ? (
-                                            <div className="message-content">
-                                                <div className="message-bubble">{msg.text}</div>
-                                                <div className="message-time">{msg.time}</div>
-                                            </div>
-                                        ) : (
-                                            <AnswerMessage msg={msg} />
-                                        )}
-                                    </div>
-                                ))}
-                                {isTyping && <TypingIndicator />}
-                                <div ref={messagesEndRef} />
-                            </div>
-
-                            <div className="chat-input-area" style={{ border: 'none', padding: '12px 0 0 0' }}>
-                                <div className="chat-input-row">
-                                    <textarea
-                                        ref={textareaRef}
-                                        rows={1}
-                                        placeholder={`Ask about ${activeSubject?.name}...`}
-                                        value={inputText}
-                                        onChange={e => setInputText(e.target.value)}
-                                        onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleChatSend(); } }}
-                                        disabled={isTyping}
-                                    />
-                                    <button className="send-btn" onClick={handleChatSend} disabled={!inputText.trim() || isTyping}>
-                                        <Send size={18} />
+                                    <button className="btn btn-secondary btn-sm" onClick={() => handleGenerate(selectedFileName, 'practice')} disabled={loading} style={{ padding: '8px 16px', border: '1px solid rgba(255,255,255,0.1)' }}>
+                                        <Zap size={14} style={{ marginRight: 8, color: 'var(--accent-neon)' }} className={loading && generatingMode === 'practice' ? "animate-spin" : ""} />
+                                        GENERATE PRACTICE
                                     </button>
                                 </div>
+                                <button className="btn btn-primary btn-sm" onClick={downloadPDF} style={{ padding: '8px 20px', boxShadow: 'var(--glow)' }}>
+                                    <FileDown size={16} style={{ marginRight: 8 }} /> DOWNLOAD PDF
+                                </button>
                             </div>
                         </div>
+
+                        {/* --- Section 1: Auto-generated Short Notes --- */}
+                        <div className="study-section">
+                            <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                <FileText size={18} color="var(--accent-neon)" /> Subject Summary & Key Notes
+                            </div>
+                            <div className="notes-content card glass" style={{ borderLeft: '4px solid var(--accent-neon)' }}>
+                                <div dangerouslySetInnerHTML={{ __html: marked.parse(content.notes || '_The AI could not generate a summary for this specific material. Try uploading more detailed notes._') }} />
+                            </div>
+                        </div>
+
+                        {/* --- Section 2: MCQs --- */}
+                        {content.mcqs && content.mcqs.length > 0 && (
+                            <div className="study-section" style={{ marginTop: 32 }} ref={quizRef}>
+                                <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <Zap size={18} color="var(--accent-neon)" /> Practice Quiz (MCQs)
+                                </div>
+                                {content.mcqs.map((q, i) => <MCQCard key={i} q={q} index={i} />)}
+                            </div>
+                        )}
+
+                        {/* --- Section 3: Short Answer --- */}
+                        {content.shortAnswer && content.shortAnswer.length > 0 && (
+                            <div className="study-section" style={{ marginTop: 32 }}>
+                                <div className="questions-section-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                                    <Sparkles size={18} color="var(--accent-neon)" /> Key Flashcards
+                                </div>
+                                <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: 12 }}>
+                                    {content.shortAnswer.map((q, i) => <ShortAnsCard key={i} q={q} index={i} />)}
+                                </div>
+                            </div>
+                        )}
                     </div>
-                </div>
+                </>
             )}
+
+            {/* --- Chat CTA Section --- */}
+            <div className="card glass animate-fade-in" style={{ marginTop: 40, padding: '32px 40px', background: 'linear-gradient(135deg, rgba(57, 255, 20, 0.05) 0%, rgba(0,0,0,0) 100%)', border: '1px solid rgba(57, 255, 20, 0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 24 }}>
+                <div style={{ flex: 1 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
+                        <MessageSquare size={20} color="var(--accent-neon)" />
+                        <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>Need more assistance?</h3>
+                    </div>
+                    <p style={{ color: 'var(--text-secondary)', fontSize: '0.95rem', margin: 0 }}>
+                        Have a specific question not covered in the summary? Deep dive with our specialized AI assistant.
+                    </p>
+                </div>
+                <button
+                    className="btn btn-primary"
+                    onClick={() => setCurrentPage('chat')}
+                    style={{ whiteSpace: 'nowrap', padding: '12px 24px', boxShadow: 'var(--glow)' }}
+                >
+                    CHAT WITH AI <Sparkles size={16} style={{ marginLeft: 8 }} />
+                </button>
+            </div>
+
         </div>
     );
 }

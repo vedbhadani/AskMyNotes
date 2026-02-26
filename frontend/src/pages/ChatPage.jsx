@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react';
 import mascotImg from '../assets/Screenshot 2026-02-26 at 18.28.04.png';
 import { useApp } from '../context/AppContext';
 import { askQuestion } from '../utils/mockApi';
+import api from '../utils/api';
 import { marked } from 'marked';
 import {
     Send, Bot, User, MessageSquare, ShieldCheck,
@@ -158,17 +159,10 @@ export default function ChatPage() {
             const formData = new FormData();
             formData.append('audio', blob, 'recording.webm');
 
-            const response = await fetch('/api/transcribe', {
-                method: 'POST',
-                body: formData,
+            const response = await api.post('/transcribe', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' }
             });
-            const data = await response.json();
-
-            if (data.error) {
-                throw new Error(data.error);
-            }
-
-            return data.text;
+            return response.data.text;
         } catch (err) {
             console.error('Transcription error:', err);
             return null;
