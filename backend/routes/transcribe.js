@@ -3,6 +3,7 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const { execSync } = require("child_process");
+const auth = require("../utils/authMiddleware");
 
 const router = express.Router();
 
@@ -67,7 +68,7 @@ function readWavAsFloat32(filePath) {
 }
 
 // ── POST /api/transcribe ─────────────────────────────────────
-router.post("/transcribe", upload.single("audio"), async (req, res) => {
+router.post("/transcribe", auth, upload.single("audio"), async (req, res) => {
     if (!req.file) {
         return res.status(400).json({ error: "No audio file uploaded" });
     }
@@ -94,8 +95,5 @@ router.post("/transcribe", upload.single("audio"), async (req, res) => {
         if (wavPath) try { fs.unlinkSync(wavPath); } catch (_) { }
     }
 });
-
-// Pre-load model in background
-getTranscriber().catch((err) => console.error("Model pre-load error:", err));
 
 module.exports = router;

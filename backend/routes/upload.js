@@ -3,9 +3,9 @@ const multer = require("multer");
 const path = require("path");
 const fs = require("fs");
 const pdfPkg = require("pdf-parse");
-const cloudinary = require("../config/cloudinary");
 const Subject = require("../models/Subject");
 const File = require("../models/File");
+const auth = require("../utils/authMiddleware");
 
 const PDFParser = pdfPkg.PDFParse;
 
@@ -65,10 +65,11 @@ async function extractText(filePath, originalName) {
 }
 
 // ─── ROUTE: Upload files for a subject ───────────────────────────────────────
-router.post("/upload", upload.array("files", 20), async (req, res) => {
+router.post("/upload", auth, upload.array("files", 20), async (req, res) => {
     try {
         const { subjectId, subjectName } = req.body;
-        console.log(`Uploading for subject: ${subjectName} (${subjectId})`);
+        const userId = req.user._id;
+        console.log(`Uploading for subject: ${subjectName} (${subjectId}) by user ${userId}`);
 
         if (!subjectId && subjectId !== "0" && subjectId !== 0) {
             return res.status(400).json({ error: "subjectId is required" });
@@ -80,8 +81,8 @@ router.post("/upload", upload.array("files", 20), async (req, res) => {
 
         // Upsert Subject document in MongoDB
         await Subject.findOneAndUpdate(
-            { subjectId: String(subjectId) },
-            { subjectId: String(subjectId), name: subjectName || `Subject ${subjectId}` },
+            { subjectId: String(subjectId), userId },
+            { subjectId: String(subjectId), name: subjectName || `Subject ${subjectId}`, userId },
             { upsert: true, new: true }
         );
 
@@ -91,27 +92,17 @@ router.post("/upload", upload.array("files", 20), async (req, res) => {
                 // 1. Extract text from the file
                 const text = await extractText(file.path, file.originalname);
 
-                // 2. Upload raw file to Cloudinary
-                let cloudinaryResult = { secure_url: "", public_id: "" };
-                try {
-                    cloudinaryResult = await cloudinary.uploader.upload(file.path, {
-                        resource_type: "raw",
-                        folder: `askmynotes/${subjectId}`,
-                        public_id: `${Date.now()}-${file.originalname}`,
-                    });
-                } catch (cloudErr) {
-                    console.error(`Cloudinary upload failed for ${file.originalname}:`, cloudErr.message);
-                    // Non-fatal: we still have the extracted text
-                }
+                // 2. Delete existing file with same name if it exists (atomic replace)
+                await File.deleteMany({ subjectId: String(subjectId), fileName: file.originalname, userId });
 
                 // 3. Save File document to MongoDB
                 await File.create({
                     subjectId: String(subjectId),
                     fileName: file.originalname,
-                    cloudinaryUrl: cloudinaryResult.secure_url,
-                    cloudinaryPublicId: cloudinaryResult.public_id,
                     extractedText: text,
+                    userId,
                 });
+                // ... (rest of the loop remains the same)
 
                 results.push({
                     fileName: file.originalname,
@@ -125,7 +116,7 @@ router.post("/upload", upload.array("files", 20), async (req, res) => {
                     error: err.message,
                 });
             } finally {
-                // 4. Always delete temp file
+                // 3. Always delete temp file
                 if (fs.existsSync(file.path)) fs.unlinkSync(file.path);
             }
         }
@@ -138,28 +129,14 @@ router.post("/upload", upload.array("files", 20), async (req, res) => {
 });
 
 // ─── ROUTE: Clear subject files ──────────────────────────────────────────────
-router.post("/clear-subject", async (req, res) => {
+router.post("/clear-subject", auth, async (req, res) => {
     try {
         const { subjectId } = req.body;
+        const userId = req.user._id;
 
-        // Find all files for this subject
-        const files = await File.find({ subjectId: String(subjectId) });
-
-        // Delete each from Cloudinary
-        for (const file of files) {
-            if (file.cloudinaryPublicId) {
-                try {
-                    await cloudinary.uploader.destroy(file.cloudinaryPublicId, {
-                        resource_type: "raw",
-                    });
-                } catch (cloudErr) {
-                    console.error(`Cloudinary delete failed for ${file.fileName}:`, cloudErr.message);
-                }
-            }
-        }
-
-        // Delete all File documents from MongoDB
-        await File.deleteMany({ subjectId: String(subjectId) });
+        // Delete all File documents from MongoDB for this subject AND user
+        await File.deleteMany({ subjectId: String(subjectId), userId });
+        // Optionally delete the subject too if needed, but for now we just clear files
 
         res.json({ success: true });
     } catch (err) {

@@ -3,6 +3,7 @@ const Groq = require("groq-sdk");
 const getSubjectText = require("../utils/getSubjectText");
 const Subject = require("../models/Subject");
 const ChatHistory = require("../models/ChatHistory");
+const auth = require("../utils/authMiddleware");
 
 const router = express.Router();
 
@@ -11,16 +12,17 @@ const groq = new Groq({
 });
 
 
-router.post("/chat", async (req, res) => {
+router.post("/chat", auth, async (req, res) => {
     try {
         const { subjectId, question, subjectName } = req.body;
+        const userId = req.user._id;
 
-        const subjectText = await getSubjectText(subjectId);
+        const subjectText = await getSubjectText(subjectId, null, userId);
 
 
         let name = subjectName;
         if (!name) {
-            const subject = await Subject.findOne({ subjectId: String(subjectId) });
+            const subject = await Subject.findOne({ subjectId: String(subjectId), userId });
             name = subject?.name || "Subject";
         }
 
@@ -45,7 +47,7 @@ Respond in JSON:
 
         const completion = await groq.chat.completions.create({
             messages: [{ role: "user", content: prompt }],
-            model: "llama-3.3-70b-versatile",
+            model: "llama-3.1-8b-instant",
             response_format: { type: "json_object" },
         });
 
@@ -60,6 +62,9 @@ Respond in JSON:
         res.json(response);
     } catch (err) {
         console.error("Chat route error:", err);
+        if (err.status === 429) {
+            return res.status(429).json({ error: "The AI is currently busy. Please wait a moment before asking another question." });
+        }
         res.status(500).json({ error: err.message });
     }
 });
