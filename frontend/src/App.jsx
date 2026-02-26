@@ -1,12 +1,17 @@
+import { useState } from 'react';
 import { AppProvider } from './context/AppContext';
+import { AuthProvider, useAuth } from './context/AuthContext';
 import { useApp } from './context/AppContext';
 import Sidebar from './components/Sidebar';
 import SetupPage from './pages/SetupPage';
 import StudyPage from './pages/StudyPage';
 import ChatPage from './pages/ChatPage';
+import SignInPage from './pages/SignInPage';
+import SignUpPage from './pages/SignUpPage';
 
 function AppContent() {
   const { currentPage, activeSubject } = useApp();
+  const { user, signOut } = useAuth();
 
   // Derive topbar title & subtitle based on current page
   const pageConfig = {
@@ -44,6 +49,15 @@ function AppContent() {
                 Reset Session
               </button>
             )}
+            {user && (
+              <div className="topbar-user">
+                <div className="topbar-avatar">{user.name.charAt(0).toUpperCase()}</div>
+                <span className="topbar-user-name">{user.name}</span>
+                <button className="btn btn-ghost btn-sm" onClick={signOut}>
+                  Sign out
+                </button>
+              </div>
+            )}
           </div>
         </header>
 
@@ -55,10 +69,29 @@ function AppContent() {
   );
 }
 
-export default function App() {
+function AuthGate() {
+  const { user, loading } = useAuth();
+  const [authPage, setAuthPage] = useState('signin'); // 'signin' | 'signup'
+
+  if (loading) return null;
+
+  if (!user) {
+    return authPage === 'signin'
+      ? <SignInPage onGoSignUp={() => setAuthPage('signup')} />
+      : <SignUpPage onGoSignIn={() => setAuthPage('signin')} />;
+  }
+
   return (
     <AppProvider>
       <AppContent />
     </AppProvider>
+  );
+}
+
+export default function App() {
+  return (
+    <AuthProvider>
+      <AuthGate />
+    </AuthProvider>
   );
 }
